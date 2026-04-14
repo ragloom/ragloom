@@ -1,0 +1,6 @@
+.git
+target
+.claude
+.worktrees
+docs
+lcov.info

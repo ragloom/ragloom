@@ -1,0 +1,28 @@
+ci:
+  - ".github/**"
+
+rust:
+  - "src/**"
+  - "tests/**"
+  - "Cargo.toml"
+  - "Cargo.lock"
+
+docs:
+  - "README.md"
+  - "docs/**"
+  - "CONTRIBUTING.md"
+  - "SECURITY.md"
+  - "SUPPORT.md"
+
+release:
+  - "Dockerfile"
+  - ".dockerignore"
+  - ".github/workflows/release.yml"
+  - ".github/workflows/publish-crate.yml"
+  - ".github/workflows/container.yml"
+
+security:
+  - "SECURITY.md"
+  - "deny.toml"
+  - ".github/workflows/governance.yml"
+  - ".github/workflows/quality-deep.yml"

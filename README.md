@@ -270,6 +270,12 @@ cargo llvm-cov --all --lcov --output-path lcov.info
 - Runtime config reload integration
 - Operational endpoints and richer retry controls
 
+## Project Governance
+
+- See `CONTRIBUTING.md` for local verification and development expectations.
+- See `SUPPORT.md` for platform and release support policy.
+- See `SECURITY.md` for vulnerability reporting guidance.
+
 ## Contributing
 
 Issues and pull requests are welcome. Keep changes small, test-backed, and aligned with the project's minimalist design goals.

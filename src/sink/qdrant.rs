@@ -84,12 +84,14 @@ impl Sink for QdrantSink {
                 .text()
                 .await
                 .unwrap_or_else(|_| "<failed to read body>".to_string());
-            return Err(RagloomError::from_kind(RagloomErrorKind::Sink).with_context(format!(
-                "qdrant upsert returned non-success status (url={}, status={}, body={})",
-                self.upsert_url(),
-                status,
-                body
-            )));
+            return Err(
+                RagloomError::from_kind(RagloomErrorKind::Sink).with_context(format!(
+                    "qdrant upsert returned non-success status (url={}, status={}, body={})",
+                    self.upsert_url(),
+                    status,
+                    body
+                )),
+            );
         }
 
         let decoded: QdrantResponse = response.json().await.map_err(|e| {

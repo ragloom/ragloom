@@ -1,0 +1,35 @@
+name: Bug Report
+description: Report a reproducible defect in Ragloom runtime, CI, or release behavior.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Describe the observed failure and why it matters.
+      placeholder: The runtime exits after startup when...
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Provide exact commands, inputs, or environment details.
+      placeholder: |
+        1. Run `cargo run -- ...`
+        2. Observe the error after the first polling tick
+    validations:
+      required: true
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: Expected Behavior
+      description: Describe the expected result.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Rust toolchain, and relevant service versions.

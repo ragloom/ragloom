@@ -1,0 +1,23 @@
+name: stale
+
+on:
+  schedule:
+    - cron: "0 5 * * 1"
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  stale:
+    name: stale
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark stale issues
+        uses: actions/stale@v9
+        with:
+          days-before-issue-stale: 45
+          days-before-issue-close: 14
+          days-before-pr-stale: -1
+          stale-issue-label: stale
+          exempt-issue-labels: roadmap,design,security

@@ -1,0 +1,24 @@
+name: Ops / Release
+description: Report release, artifact, supply-chain, or registry issues.
+title: "[ops] "
+labels: ["ops", "release"]
+body:
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: Explain how the issue affects release consumers or maintainers.
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: Include affected artifact names, tags, registries, or failing checks.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Paste logs, checksums, registry errors, or provenance details.

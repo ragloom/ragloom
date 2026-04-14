@@ -27,7 +27,22 @@ fn uuid_from_path_and_chunk(canonical_path: &str, chunk_index: usize) -> String 
 
     format!(
         "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]
+        b[0],
+        b[1],
+        b[2],
+        b[3],
+        b[4],
+        b[5],
+        b[6],
+        b[7],
+        b[8],
+        b[9],
+        b[10],
+        b[11],
+        b[12],
+        b[13],
+        b[14],
+        b[15]
     )
 }
 
@@ -58,7 +73,9 @@ fn doc_id_from_canonical_path(canonical_path_uri: &str) -> String {
     //
     // # Why
     // Allows efficient filtering/deletion of all chunks for a document.
-    blake3::hash(canonical_path_uri.as_bytes()).to_hex().to_string()
+    blake3::hash(canonical_path_uri.as_bytes())
+        .to_hex()
+        .to_string()
 }
 
 fn file_extension_from_canonical_path(canonical_path: &str) -> String {
@@ -71,7 +88,6 @@ fn file_extension_from_canonical_path(canonical_path: &str) -> String {
         .unwrap_or("")
         .to_string()
 }
-
 
 /// A minimal in-process runtime.
 ///
