@@ -280,6 +280,14 @@ cargo llvm-cov --all --lcov --output-path lcov.info
 
 Issues and pull requests are welcome. Keep changes small, test-backed, and aligned with the project's minimalist design goals.
 
+Before opening a pull request, run the local developer gate:
+
+```bash
+cargo qa
+```
+
+`cargo qa` runs the day-to-day repository checks used during development: formatting, Clippy, and the full workspace test suite.
+
 ## License
 
 Apache-2.0

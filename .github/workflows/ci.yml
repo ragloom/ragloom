@@ -2,6 +2,7 @@ name: ci
 
 on:
   pull_request:
+  pull_request_target:
   push:
     branches:
       - main
@@ -16,6 +17,7 @@ concurrency:
 jobs:
   rust-ci:
     name: rust-ci (${{ matrix.os }})
+    if: github.event_name != 'pull_request_target'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -44,6 +46,7 @@ jobs:
 
   macos-smoke:
     name: macos-smoke
+    if: github.event_name != 'pull_request_target'
     runs-on: macos-latest
     continue-on-error: true
     steps:
@@ -61,7 +64,7 @@ jobs:
 
   labeler:
     name: labeler
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
     permissions:
       contents: read

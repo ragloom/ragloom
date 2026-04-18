@@ -1,0 +1,2 @@
+[alias]
+qa = "run -p xtask -- qa"
