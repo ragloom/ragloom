@@ -1,25 +1,39 @@
-//! Text chunking.
+//! Legacy chunker API preserved as deprecated shims.
 //!
 //! # Why
-//! Most embedding models have context limits and perform better with moderately
-//! sized, semantically coherent inputs. Chunking is therefore a first-class,
-//! configurable transform.
+//! External callers and existing tests still import `chunk_text` /
+//! `chunk_document` / `ChunkerConfig`. Phase 1 keeps them working against the
+//! same semantics while emitting a deprecation warning. Task 7 will re-wire
+//! these shims to route through `RecursiveChunker`; Task 2 keeps the behavior
+//! byte-identical to the old `chunker.rs`.
+
+use super::public_types::{BoundaryKind, Chunk, ChunkedDocument};
 
 /// Chunker configuration.
 ///
 /// # Why
 /// Keeping parameters explicit makes chunk boundaries reproducible, which is
 /// required for deterministic IDs and idempotent sink writes.
+#[deprecated(
+    since = "0.2.0",
+    note = "use RecursiveChunker through the Chunker trait"
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChunkerConfig {
     pub max_chars: usize,
     pub min_chars: usize,
     pub overlap_chars: usize,
+    #[allow(deprecated)]
     pub strategy: ChunkingStrategy,
 }
 
+#[allow(deprecated)]
 impl ChunkerConfig {
     /// Compatibility constructor (simple max-char chunking, no overlap).
+    #[deprecated(
+        since = "0.2.0",
+        note = "use RecursiveChunker through the Chunker trait"
+    )]
     pub fn new(max_chars: usize) -> Self {
         Self {
             max_chars,
@@ -30,34 +44,20 @@ impl ChunkerConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BoundaryKind {
-    Paragraph,
-    Line,
-    Whitespace,
-    Forced,
-}
-
+#[deprecated(
+    since = "0.2.0",
+    note = "use RecursiveChunker through the Chunker trait"
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChunkingStrategy {
     BoundaryAware,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Chunk {
-    pub index: usize,
-    pub text: String,
-    pub boundary: BoundaryKind,
-    pub start_byte: usize,
-    pub end_byte: usize,
-    pub char_len: usize,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChunkedDocument {
-    pub chunks: Vec<Chunk>,
-}
-
+#[deprecated(
+    since = "0.2.0",
+    note = "use RecursiveChunker through the Chunker trait"
+)]
+#[allow(deprecated)]
 pub fn chunk_document(text: &str, cfg: &ChunkerConfig) -> ChunkedDocument {
     if cfg.max_chars == 0 || text.is_empty() {
         return ChunkedDocument { chunks: Vec::new() };
@@ -158,6 +158,7 @@ fn normalize_newlines(text: &str) -> String {
     out
 }
 
+#[allow(deprecated)]
 fn find_split_point(
     text: &str,
     boundaries: &[usize],
@@ -271,6 +272,11 @@ fn byte_to_char_index(boundaries: &[usize], byte_idx: usize) -> Option<usize> {
 /// This MVP chunker is intentionally simple and deterministic. More advanced
 /// strategies (token-based, sentence-aware) can be introduced later without
 /// modifying call sites.
+#[deprecated(
+    since = "0.2.0",
+    note = "use RecursiveChunker through the Chunker trait"
+)]
+#[allow(deprecated)]
 pub fn chunk_text(text: &str, cfg: ChunkerConfig) -> Vec<String> {
     // Compatibility adapter: keep the old API but route through chunk_document.
     chunk_document(text, &cfg)
@@ -281,6 +287,7 @@ pub fn chunk_text(text: &str, cfg: ChunkerConfig) -> Vec<String> {
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
 
