@@ -346,11 +346,12 @@ async fn try_main() -> Result<(), RagloomError> {
     };
 
     if cfg.tokenizer != "tiktoken-cl100k" {
-        return Err(RagloomError::from_kind(RagloomErrorKind::Config)
-            .with_context(format!(
+        return Err(
+            RagloomError::from_kind(RagloomErrorKind::Config).with_context(format!(
                 "unsupported --tokenizer: {} (phase 1 supports only: tiktoken-cl100k)",
                 cfg.tokenizer
-            )));
+            )),
+        );
     }
     tracing::info!(
         event.name = "ragloom.chunker.tokenizer_selected",
