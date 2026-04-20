@@ -12,6 +12,12 @@ pub enum ChunkError {
     InvalidConfig(String),
     #[error("tokenizer init failed: {0}")]
     Tokenizer(String),
+    #[error("parse error in {lang} at byte {pos}: {detail}")]
+    ParseError {
+        lang: String,
+        pos: usize,
+        detail: String,
+    },
 }
 
 pub type ChunkResult<T> = Result<T, ChunkError>;

@@ -6,6 +6,7 @@
 //! [`StrategyFingerprint`] that is mixed into point IDs to keep determinism
 //! safe across future strategy evolutions.
 
+pub mod code;
 mod engine;
 mod error;
 mod fingerprint;
@@ -15,6 +16,7 @@ mod public_types;
 pub mod recursive;
 pub mod size;
 
+pub use code::{CodeChunker, Language};
 pub use error::{ChunkError, ChunkResult};
 pub use fingerprint::StrategyFingerprint;
 pub use markdown::MarkdownChunker;
