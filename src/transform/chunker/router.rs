@@ -30,7 +30,14 @@ impl ChunkerRouter {
         }
     }
 
-    pub fn fingerprint(&self) -> &StrategyFingerprint {
+    /// The router's own configuration fingerprint (for diagnostics only).
+    ///
+    /// # Why
+    /// The router does not stamp this into [`ChunkedDocument`] — each
+    /// document carries the delegate chunker's fingerprint instead. This
+    /// getter exists purely for startup-time configuration logging. Do not
+    /// mix it into any hash that feeds the point-ID scheme.
+    pub fn config_fingerprint(&self) -> &StrategyFingerprint {
         &self.fingerprint
     }
 }
@@ -42,6 +49,11 @@ pub struct ChunkerRouterBuilder {
 
 impl ChunkerRouterBuilder {
     pub fn register(mut self, extension: &'static str, chunker: Arc<dyn Chunker>) -> Self {
+        debug_assert!(
+            !self.by_extension.contains_key(extension),
+            "ChunkerRouter::register called twice for extension {:?}",
+            extension
+        );
         self.by_extension.insert(extension, chunker);
         self
     }

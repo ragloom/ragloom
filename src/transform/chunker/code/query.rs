@@ -66,6 +66,12 @@ impl Lang {
                 "mod_item",
                 "union_item",
                 "type_item",
+                "const_item",
+                "static_item",
+                "use_declaration",
+                "extern_crate_declaration",
+                "macro_definition",
+                "foreign_mod_item",
             ],
             Lang::Python => &[
                 "function_definition",
@@ -94,6 +100,8 @@ impl Lang {
                 "function_declaration",
                 "method_declaration",
                 "type_declaration",
+                "var_declaration",
+                "const_declaration",
             ],
             Lang::Java => &[
                 "method_declaration",
