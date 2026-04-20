@@ -100,4 +100,16 @@ async fn points_payload_includes_chunk_metadata_and_optional_text() {
     assert!(payload.contains_key("total_chunks"));
     assert!(payload.contains_key("previous_chunk_id"));
     assert!(payload.contains_key("next_chunk_id"));
+
+    // Task 9: strategy_fingerprint must be present and match the default pipeline
+    // chunker (RecursiveChunker with recursive_config_chars_512()).
+    assert!(payload.contains_key("strategy_fingerprint"));
+    assert!(payload.get("strategy_fingerprint").is_some());
+    assert_eq!(
+        payload["strategy_fingerprint"],
+        serde_json::Value::String(
+            "recursive:v1|metric=chars|tokenizer=chars|max=512|min=0|overlap=0".to_string()
+        ),
+        "payload must carry the chunker strategy fingerprint"
+    );
 }
