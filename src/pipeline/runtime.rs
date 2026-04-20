@@ -370,7 +370,8 @@ impl WorkExecutor for PipelineExecutor {
                     "ragloom.pipeline.process_file",
                     canonical_path = fingerprint.canonical_path.as_str(),
                     size_bytes = fingerprint.size_bytes,
-                    mtime_unix_secs = fingerprint.mtime_unix_secs
+                    mtime_unix_secs = fingerprint.mtime_unix_secs,
+                    strategy = %self.chunker.strategy_fingerprint(),
                 )
                 .in_scope(|| async {
                     let load_elapsed = std::time::Instant::now();

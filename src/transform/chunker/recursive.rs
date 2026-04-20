@@ -84,6 +84,14 @@ impl RecursiveChunker {
 }
 
 impl Chunker for RecursiveChunker {
+    #[tracing::instrument(
+        name = "ragloom.chunker.recursive.chunk",
+        skip(self, text),
+        fields(
+            bytes = text.len(),
+            strategy = %self.fingerprint,
+        )
+    )]
     fn chunk(&self, text: &str) -> ChunkResult<ChunkedDocument> {
         if self.cfg.max_size == 0 || text.is_empty() {
             return Ok(ChunkedDocument { chunks: Vec::new() });
@@ -171,6 +179,12 @@ impl Chunker for RecursiveChunker {
                 cursor_byte = next_cursor;
             }
         }
+
+        tracing::debug!(
+            event.name = "ragloom.chunker.recursive.done",
+            chunks_produced = chunks.len(),
+            "ragloom.chunker.recursive.done",
+        );
 
         Ok(ChunkedDocument { chunks })
     }
