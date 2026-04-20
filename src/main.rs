@@ -27,6 +27,12 @@ pub struct RunConfig {
     pub embed_backend: EmbedBackend,
     pub qdrant_url: String,
     pub collection: String,
+    pub chunker_strategy: String,
+    pub size_metric: String,
+    pub size_max: usize,
+    pub size_min: usize,
+    pub size_overlap: usize,
+    pub tokenizer: String,
 }
 
 /// Embedding backend selection.
@@ -66,6 +72,13 @@ pub fn parse_args(args: &[String]) -> Result<RunConfig, RagloomError> {
     let mut qdrant_url: Option<String> = None;
     let mut collection: Option<String> = None;
 
+    let mut chunker_strategy: Option<String> = None;
+    let mut size_metric: Option<String> = None;
+    let mut size_max: Option<String> = None;
+    let mut size_min: Option<String> = None;
+    let mut size_overlap: Option<String> = None;
+    let mut tokenizer: Option<String> = None;
+
     let mut iter = args.iter().skip(1);
     while let Some(arg) = iter.next() {
         let (flag, inline_value) = match arg.split_once('=') {
@@ -93,6 +106,13 @@ pub fn parse_args(args: &[String]) -> Result<RunConfig, RagloomError> {
 
             "--qdrant-url" => qdrant_url = next_value(),
             "--collection" => collection = next_value(),
+
+            "--chunker-strategy" => chunker_strategy = next_value(),
+            "--size-metric" => size_metric = next_value(),
+            "--size-max" => size_max = next_value(),
+            "--size-min" => size_min = next_value(),
+            "--size-overlap" => size_overlap = next_value(),
+            "--tokenizer" => tokenizer = next_value(),
             "--help" | "-h" => {
                 return Err(RagloomError::from_kind(RagloomErrorKind::InvalidInput).with_context(
                     "usage: ragloom --dir <path> --qdrant-url <url> --collection <name> [--embed-backend <openai|http>]",
@@ -161,11 +181,80 @@ pub fn parse_args(args: &[String]) -> Result<RunConfig, RagloomError> {
         }
     };
 
+    let chunker_strategy = chunker_strategy.unwrap_or_else(|| "recursive".to_string());
+    match chunker_strategy.as_str() {
+        "recursive" | "legacy" => {}
+        other => {
+            return Err(RagloomError::from_kind(RagloomErrorKind::InvalidInput)
+                .with_context(format!(
+                    "invalid --chunker-strategy: {other} (expected: recursive|legacy)"
+                )));
+        }
+    }
+
+    let size_metric = size_metric.unwrap_or_else(|| "chars".to_string());
+    match size_metric.as_str() {
+        "chars" | "tokens" => {}
+        other => {
+            return Err(RagloomError::from_kind(RagloomErrorKind::InvalidInput)
+                .with_context(format!(
+                    "invalid --size-metric: {other} (expected: chars|tokens)"
+                )));
+        }
+    }
+
+    let size_max = size_max
+        .map(|s| {
+            s.parse::<usize>().map_err(|e| {
+                RagloomError::from_kind(RagloomErrorKind::InvalidInput)
+                    .with_context(format!("--size-max must be integer: {e}"))
+            })
+        })
+        .transpose()?
+        .unwrap_or(if size_metric == "tokens" { 512 } else { 2000 });
+
+    let size_min = size_min
+        .map(|s| {
+            s.parse::<usize>().map_err(|e| {
+                RagloomError::from_kind(RagloomErrorKind::InvalidInput)
+                    .with_context(format!("--size-min must be integer: {e}"))
+            })
+        })
+        .transpose()?
+        .unwrap_or(0);
+
+    let size_overlap = size_overlap
+        .map(|s| {
+            s.parse::<usize>().map_err(|e| {
+                RagloomError::from_kind(RagloomErrorKind::InvalidInput)
+                    .with_context(format!("--size-overlap must be integer: {e}"))
+            })
+        })
+        .transpose()?
+        .unwrap_or(0);
+
+    let tokenizer = tokenizer.unwrap_or_else(|| "tiktoken-cl100k".to_string());
+    match tokenizer.as_str() {
+        "tiktoken-cl100k" => {}
+        other => {
+            return Err(RagloomError::from_kind(RagloomErrorKind::InvalidInput)
+                .with_context(format!(
+                    "invalid --tokenizer: {other} (expected: tiktoken-cl100k)"
+                )));
+        }
+    }
+
     Ok(RunConfig {
         dir,
         embed_backend,
         qdrant_url,
         collection,
+        chunker_strategy,
+        size_metric,
+        size_max,
+        size_min,
+        size_overlap,
+        tokenizer,
     })
 }
 
@@ -247,10 +336,35 @@ async fn try_main() -> Result<(), RagloomError> {
     })
     .map_err(|e| e.with_context("failed to build Qdrant sink"))?;
 
-    let pipeline = PipelineExecutor::new(
+    let metric = match cfg.size_metric.as_str() {
+        "chars" => ragloom::transform::chunker::size::SizeMetric::Chars,
+        "tokens" => ragloom::transform::chunker::size::SizeMetric::Tokens,
+        _ => unreachable!("validated in parse_args"),
+    };
+
+    let rec_cfg = ragloom::transform::chunker::recursive::RecursiveConfig {
+        metric,
+        max_size: cfg.size_max,
+        min_size: cfg.size_min,
+        overlap: cfg.size_overlap,
+    };
+
+    let chunker: std::sync::Arc<dyn ragloom::transform::chunker::Chunker> =
+        match cfg.chunker_strategy.as_str() {
+            "recursive" | "legacy" => std::sync::Arc::new(
+                ragloom::transform::chunker::RecursiveChunker::new(rec_cfg).map_err(|e| {
+                    RagloomError::new(RagloomErrorKind::Config, e)
+                        .with_context("invalid chunker config")
+                })?,
+            ),
+            _ => unreachable!("validated in parse_args"),
+        };
+
+    let pipeline = PipelineExecutor::with_chunker(
         embedding,
         std::sync::Arc::new(sink),
         std::sync::Arc::new(FsUtf8Loader),
+        chunker,
     );
 
     let executor = AckingExecutor {
@@ -334,6 +448,12 @@ mod tests {
                 },
                 qdrant_url: "http://qdrant".to_string(),
                 collection: "docs".to_string(),
+                chunker_strategy: "recursive".to_string(),
+                size_metric: "chars".to_string(),
+                size_max: 2000,
+                size_min: 0,
+                size_overlap: 0,
+                tokenizer: "tiktoken-cl100k".to_string(),
             }
         );
     }
