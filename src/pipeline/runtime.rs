@@ -274,7 +274,8 @@ impl PipelineExecutor {
         fingerprint: &crate::ids::FileFingerprint,
         text: &str,
     ) -> Result<Vec<crate::sink::VectorPoint>, crate::error::RagloomError> {
-        let mut doc = self.chunker.chunk(text)?;
+        let hint = crate::transform::chunker::ChunkHint::from_path(&fingerprint.canonical_path);
+        let mut doc = self.chunker.chunk(text, &hint)?;
         if doc.chunks.is_empty() {
             // Keep downstream behavior predictable.
             doc.chunks.push(crate::transform::chunker::Chunk {
@@ -286,6 +287,7 @@ impl PipelineExecutor {
                 char_len: text.chars().count(),
             });
         }
+        let strategy_fp = &doc.strategy_fingerprint;
 
         let inputs: Vec<String> = doc.chunks.iter().map(|c| c.text.clone()).collect();
 
@@ -306,7 +308,6 @@ impl PipelineExecutor {
                 // Qdrant point id must be an unsigned integer or UUID.
                 // We use a stable UUID derived from (canonical_path, chunk_index, strategy_fingerprint)
                 // to preserve idempotency while keeping strategy changes in separate ID spaces.
-                let strategy_fp = self.chunker.strategy_fingerprint();
                 let id = crate::sink::PointId::parse(uuid_from_path_chunk_strategy(
                     &fingerprint.canonical_path,
                     idx,
@@ -386,7 +387,6 @@ impl WorkExecutor for PipelineExecutor {
                     canonical_path = fingerprint.canonical_path.as_str(),
                     size_bytes = fingerprint.size_bytes,
                     mtime_unix_secs = fingerprint.mtime_unix_secs,
-                    strategy = %self.chunker.strategy_fingerprint(),
                 )
                 .in_scope(|| async {
                     let load_elapsed = std::time::Instant::now();

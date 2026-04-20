@@ -6,7 +6,7 @@
 
 use proptest::prelude::*;
 use ragloom::transform::chunker::{
-    Chunker,
+    ChunkHint, Chunker,
     recursive::{RecursiveChunker, RecursiveConfig},
     size::SizeMetric,
 };
@@ -33,7 +33,7 @@ proptest! {
         max in 1usize..64,
     ) {
         let c = chunker(max);
-        let doc = c.chunk(&text).expect("chunk");
+        let doc = c.chunk(&text, &ChunkHint::none()).expect("chunk");
         for ch in doc.chunks {
             prop_assert!(
                 ch.char_len <= max,
@@ -49,7 +49,7 @@ proptest! {
         max in 1usize..64,
     ) {
         let c = chunker(max);
-        let doc = c.chunk(&text).expect("chunk");
+        let doc = c.chunk(&text, &ChunkHint::none()).expect("chunk");
         for ch in doc.chunks {
             // If `text` field exists, its char count should equal char_len.
             prop_assert_eq!(ch.text.chars().count(), ch.char_len);
@@ -62,7 +62,7 @@ proptest! {
         max in 1usize..64,
     ) {
         let c = chunker(max);
-        let doc = c.chunk(&text).expect("chunk");
+        let doc = c.chunk(&text, &ChunkHint::none()).expect("chunk");
 
         // Normalize the input the same way the chunker does (CRLF/CR -> LF)
         // so character counts line up.
