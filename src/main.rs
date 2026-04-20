@@ -280,14 +280,14 @@ pub fn parse_args(args: &[String]) -> Result<RunConfig, RagloomError> {
             .with_context("--chunker-mode=single requires --chunker-single"));
     }
 
-    if enable_semantic
-        && chunker_mode == "single"
-        && chunker_single.as_deref() != Some("semantic")
+    if enable_semantic && chunker_mode == "single" && chunker_single.as_deref() != Some("semantic")
     {
-        return Err(RagloomError::from_kind(RagloomErrorKind::InvalidInput).with_context(
-            "--enable-semantic is only honored with --chunker-mode=router or \
+        return Err(
+            RagloomError::from_kind(RagloomErrorKind::InvalidInput).with_context(
+                "--enable-semantic is only honored with --chunker-mode=router or \
              --chunker-mode=single with --chunker-single=semantic",
-        ));
+            ),
+        );
     }
 
     let semantic_provider = semantic_provider.unwrap_or_else(|| "adapter".to_string());

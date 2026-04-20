@@ -15,11 +15,7 @@ use ragloom::transform::chunker::{
 struct KeywordSignal;
 
 fn bucket(s: &str) -> [f32; 3] {
-    let first = s
-        .split_whitespace()
-        .next()
-        .unwrap_or("")
-        .to_lowercase();
+    let first = s.split_whitespace().next().unwrap_or("").to_lowercase();
     if first.starts_with("cat") || first.starts_with("the") {
         [1.0, 0.0, 0.0]
     } else if first.starts_with("rust") || first.starts_with("its") || first.starts_with("many") {
