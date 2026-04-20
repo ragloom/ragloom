@@ -18,6 +18,8 @@ pub enum ChunkError {
         pos: usize,
         detail: String,
     },
+    #[error("semantic chunker: {0}")]
+    Semantic(#[from] crate::transform::chunker::semantic::signal::SemanticError),
 }
 
 pub type ChunkResult<T> = Result<T, ChunkError>;
