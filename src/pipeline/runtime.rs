@@ -10,39 +10,36 @@ use crate::pipeline::planner::Planner;
 use crate::source::Source;
 use crate::state::wal::{InMemoryWal, WalRecord};
 
-fn uuid_from_path_and_chunk(canonical_path: &str, chunk_index: usize) -> String {
-    // Stable, deterministic UUID v4-style string derived from a hash.
+fn uuid_from_path_chunk_strategy(
+    canonical_path: &str,
+    chunk_index: usize,
+    strategy: &crate::transform::chunker::StrategyFingerprint,
+) -> String {
+    // Stable, deterministic UUID v4-style string derived from a blake3 hash of
+    // (canonical_path, chunk_index, strategy_fingerprint).
     //
     // # Why
-    // Qdrant accepts UUID point ids, and we want stable ids for idempotent upserts.
-    let input = format!("{}:{}", canonical_path, chunk_index);
-    let hash = blake3::hash(input.as_bytes());
+    // Qdrant accepts UUID point ids, and we want stable ids for idempotent
+    // upserts. The strategy fingerprint is mixed into the hash so that any
+    // future change of chunker / parameters yields a distinct ID space and
+    // never silently collides with older points.
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(canonical_path.as_bytes());
+    hasher.update(&[0x1F]);
+    hasher.update(&(chunk_index as u64).to_le_bytes());
+    hasher.update(&[0x1F]);
+    hasher.update(strategy.as_bytes());
+    let hash = hasher.finalize();
     let bytes = hash.as_bytes();
     let mut b = [0u8; 16];
     b.copy_from_slice(&bytes[..16]);
 
-    // Set version (4) and variant (RFC 4122) bits.
     b[6] = (b[6] & 0x0f) | 0x40;
     b[8] = (b[8] & 0x3f) | 0x80;
 
     format!(
         "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        b[0],
-        b[1],
-        b[2],
-        b[3],
-        b[4],
-        b[5],
-        b[6],
-        b[7],
-        b[8],
-        b[9],
-        b[10],
-        b[11],
-        b[12],
-        b[13],
-        b[14],
-        b[15]
+        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]
     )
 }
 
@@ -197,12 +194,22 @@ pub async fn run_worker(mut queue: WorkQueue, executor: impl WorkExecutor) {
 /// # Why
 /// This is the smallest end-to-end executor that lets us validate the runtime
 /// wiring in tests without implementing retries, batching, or caching.
-#[derive(Clone)]
 pub struct PipelineExecutor {
     embedding: std::sync::Arc<dyn crate::embed::EmbeddingProvider + Send + Sync>,
     sink: std::sync::Arc<dyn crate::sink::Sink + Send + Sync>,
     loader: std::sync::Arc<dyn crate::doc::DocumentLoader + Send + Sync>,
-    chunker_cfg: crate::transform::chunker::ChunkerConfig,
+    chunker: std::sync::Arc<dyn crate::transform::chunker::Chunker>,
+}
+
+impl Clone for PipelineExecutor {
+    fn clone(&self) -> Self {
+        Self {
+            embedding: self.embedding.clone(),
+            sink: self.sink.clone(),
+            loader: self.loader.clone(),
+            chunker: self.chunker.clone(),
+        }
+    }
 }
 
 impl PipelineExecutor {
@@ -211,14 +218,31 @@ impl PipelineExecutor {
         sink: std::sync::Arc<dyn crate::sink::Sink + Send + Sync>,
         loader: std::sync::Arc<dyn crate::doc::DocumentLoader + Send + Sync>,
     ) -> Self {
-        // Keep config deterministic and non-zero so we always yield at least one
-        // chunk for non-empty inputs.
-        let chunker_cfg = crate::transform::chunker::ChunkerConfig::new(512);
+        let chunker = std::sync::Arc::new(
+            crate::transform::chunker::RecursiveChunker::new(
+                crate::transform::chunker::recursive_config_chars_512(),
+            )
+            .expect("default recursive config is always valid"),
+        );
         Self {
             embedding,
             sink,
             loader,
-            chunker_cfg,
+            chunker,
+        }
+    }
+
+    pub fn with_chunker(
+        embedding: std::sync::Arc<dyn crate::embed::EmbeddingProvider + Send + Sync>,
+        sink: std::sync::Arc<dyn crate::sink::Sink + Send + Sync>,
+        loader: std::sync::Arc<dyn crate::doc::DocumentLoader + Send + Sync>,
+        chunker: std::sync::Arc<dyn crate::transform::chunker::Chunker>,
+    ) -> Self {
+        Self {
+            embedding,
+            sink,
+            loader,
+            chunker,
         }
     }
 }
@@ -235,7 +259,7 @@ impl PipelineExecutor {
         fingerprint: &crate::ids::FileFingerprint,
         text: &str,
     ) -> Result<Vec<crate::sink::VectorPoint>, crate::error::RagloomError> {
-        let mut doc = crate::transform::chunker::chunk_document(text, &self.chunker_cfg);
+        let mut doc = self.chunker.chunk(text)?;
         if doc.chunks.is_empty() {
             // Keep downstream behavior predictable.
             doc.chunks.push(crate::transform::chunker::Chunk {
@@ -265,9 +289,15 @@ impl PipelineExecutor {
                 let chunk = &doc.chunks[idx];
 
                 // Qdrant point id must be an unsigned integer or UUID.
-                // We use a stable UUID derived from (canonical_path, chunk_index) to preserve idempotency.
-                let id = crate::sink::PointId::parse(uuid_from_path_and_chunk(&fingerprint.canonical_path, idx))
-                    .expect("generated uuid should be valid");
+                // We use a stable UUID derived from (canonical_path, chunk_index, strategy_fingerprint)
+                // to preserve idempotency while keeping strategy changes in separate ID spaces.
+                let strategy_fp = self.chunker.strategy_fingerprint();
+                let id = crate::sink::PointId::parse(uuid_from_path_chunk_strategy(
+                    &fingerprint.canonical_path,
+                    idx,
+                    strategy_fp,
+                ))
+                .expect("generated uuid should be valid");
 
                 let chunk_text_sha256 = blake3::hash(chunk.text.as_bytes()).to_hex().to_string();
 
@@ -276,12 +306,20 @@ impl PipelineExecutor {
                 let total_chunks = doc.chunks.len();
 
                 let previous_chunk_id = if idx > 0 {
-                    Some(uuid_from_path_and_chunk(&fingerprint.canonical_path, idx - 1))
+                    Some(uuid_from_path_chunk_strategy(
+                        &fingerprint.canonical_path,
+                        idx - 1,
+                        strategy_fp,
+                    ))
                 } else {
                     None
                 };
                 let next_chunk_id = if idx + 1 < total_chunks {
-                    Some(uuid_from_path_and_chunk(&fingerprint.canonical_path, idx + 1))
+                    Some(uuid_from_path_chunk_strategy(
+                        &fingerprint.canonical_path,
+                        idx + 1,
+                        strategy_fp,
+                    ))
                 } else {
                     None
                 };
@@ -305,6 +343,7 @@ impl PipelineExecutor {
                     "chunk_end_byte": chunk.end_byte,
                     "chunk_char_len": chunk.char_len,
                     "chunk_text_sha256": chunk_text_sha256,
+                    "strategy_fingerprint": strategy_fp.as_str(),
                     "chunk_text": chunk.text,
                 });
 

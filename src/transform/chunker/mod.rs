@@ -28,3 +28,14 @@ pub trait Chunker: Send + Sync {
     fn chunk(&self, text: &str) -> ChunkResult<ChunkedDocument>;
     fn strategy_fingerprint(&self) -> &StrategyFingerprint;
 }
+
+/// Default recursive config used by [`crate::pipeline::runtime::PipelineExecutor::new`]:
+/// chars metric, 512-char budget, no overlap, no min-size floor.
+pub fn recursive_config_chars_512() -> recursive::RecursiveConfig {
+    recursive::RecursiveConfig {
+        metric: size::SizeMetric::Chars,
+        max_size: 512,
+        min_size: 0,
+        overlap: 0,
+    }
+}

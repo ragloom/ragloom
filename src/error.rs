@@ -147,6 +147,12 @@ impl std::fmt::Display for RagloomErrorContext {
     }
 }
 
+impl From<crate::transform::chunker::ChunkError> for RagloomError {
+    fn from(err: crate::transform::chunker::ChunkError) -> Self {
+        RagloomError::new(RagloomErrorKind::Internal, err).with_context("chunker failed")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
