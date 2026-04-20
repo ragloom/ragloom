@@ -1,0 +1,5 @@
+The cat sat on the mat. The cat was very fluffy. The cat enjoyed the sun.
+
+Rust is a systems programming language. Its ownership model is unique. Many engineers appreciate Rust.
+
+Cooking is an art and a science. Temperature control matters. Timing matters too.
