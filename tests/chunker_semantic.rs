@@ -6,16 +6,20 @@
 use std::sync::Arc;
 
 use ragloom::transform::chunker::semantic::{
-    signal::SemanticError, SemanticChunker, SemanticSignalProvider,
+    SemanticChunker, SemanticSignalProvider, signal::SemanticError,
 };
 use ragloom::transform::chunker::{
-    recursive::RecursiveConfig, size::SizeMetric, ChunkHint, Chunker,
+    ChunkHint, Chunker, recursive::RecursiveConfig, size::SizeMetric,
 };
 
 struct KeywordSignal;
 
 fn bucket(s: &str) -> [f32; 3] {
-    let first = s.trim_start().split_whitespace().next().unwrap_or("").to_lowercase();
+    let first = s
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_lowercase();
     if first.starts_with("cat") || first.starts_with("the") {
         [1.0, 0.0, 0.0]
     } else if first.starts_with("rust") || first.starts_with("its") || first.starts_with("many") {
@@ -29,11 +33,18 @@ impl SemanticSignalProvider for KeywordSignal {
     fn embed(&self, inputs: &[String]) -> Result<Vec<Vec<f32>>, SemanticError> {
         Ok(inputs.iter().map(|s| bucket(s).to_vec()).collect())
     }
-    fn fingerprint(&self) -> &str { "keyword:test" }
+    fn fingerprint(&self) -> &str {
+        "keyword:test"
+    }
 }
 
 fn cfg() -> RecursiveConfig {
-    RecursiveConfig { metric: SizeMetric::Chars, max_size: 2000, min_size: 0, overlap: 0 }
+    RecursiveConfig {
+        metric: SizeMetric::Chars,
+        max_size: 2000,
+        min_size: 0,
+        overlap: 0,
+    }
 }
 
 #[test]
@@ -43,9 +54,17 @@ fn three_topics_produce_multiple_chunks() {
     let c = SemanticChunker::new(signal, cfg(), 60).unwrap();
     let doc = c.chunk(&text, &ChunkHint::none()).unwrap();
 
-    assert!(doc.chunks.len() >= 2, "expected multi-chunk split, got: {:?}", doc.chunks);
+    assert!(
+        doc.chunks.len() >= 2,
+        "expected multi-chunk split, got: {:?}",
+        doc.chunks
+    );
     assert!(doc.strategy_fingerprint.as_str().starts_with("semantic:v1"));
-    assert!(doc.strategy_fingerprint.as_str().contains("signal=keyword:test"));
+    assert!(
+        doc.strategy_fingerprint
+            .as_str()
+            .contains("signal=keyword:test")
+    );
     assert!(doc.strategy_fingerprint.as_str().contains("percentile=60"));
 }
 

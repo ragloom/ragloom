@@ -10,7 +10,7 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use ragloom::transform::chunker::semantic::{
-    signal::SemanticError, SemanticChunker, SemanticSignalProvider,
+    SemanticChunker, SemanticSignalProvider, signal::SemanticError,
 };
 use ragloom::transform::chunker::{
     ChunkHint, Chunker, CodeChunker, MarkdownChunker,
@@ -26,7 +26,9 @@ impl SemanticSignalProvider for StaticSignal {
     fn embed(&self, inputs: &[String]) -> Result<Vec<Vec<f32>>, SemanticError> {
         Ok(inputs.iter().map(|_| vec![1.0_f32, 0.0]).collect())
     }
-    fn fingerprint(&self) -> &str { "bench:static" }
+    fn fingerprint(&self) -> &str {
+        "bench:static"
+    }
 }
 
 fn sample(size: usize) -> String {
@@ -131,14 +133,24 @@ fn bench(c: &mut Criterion) {
         );
 
         let semantic_sample = sample(n);
-        group.bench_with_input(BenchmarkId::new("semantic_static_512", n), &semantic_sample, |b, text| {
-            let chk = SemanticChunker::new(
-                std::sync::Arc::new(StaticSignal),
-                RecursiveConfig { metric: SizeMetric::Chars, max_size: 512, min_size: 0, overlap: 0 },
-                95,
-            ).unwrap();
-            b.iter(|| chk.chunk(text, &ChunkHint::none()).unwrap());
-        });
+        group.bench_with_input(
+            BenchmarkId::new("semantic_static_512", n),
+            &semantic_sample,
+            |b, text| {
+                let chk = SemanticChunker::new(
+                    std::sync::Arc::new(StaticSignal),
+                    RecursiveConfig {
+                        metric: SizeMetric::Chars,
+                        max_size: 512,
+                        min_size: 0,
+                        overlap: 0,
+                    },
+                    95,
+                )
+                .unwrap();
+                b.iter(|| chk.chunk(text, &ChunkHint::none()).unwrap());
+            },
+        );
     }
     group.finish();
 }

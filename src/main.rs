@@ -286,15 +286,19 @@ pub fn parse_args(args: &[String]) -> Result<RunConfig, RagloomError> {
         "fastembed" => {
             #[cfg(not(feature = "fastembed"))]
             {
-                return Err(RagloomError::from_kind(RagloomErrorKind::InvalidInput).with_context(
-                    "--semantic-provider=fastembed requires the \"fastembed\" Cargo feature",
-                ));
+                return Err(
+                    RagloomError::from_kind(RagloomErrorKind::InvalidInput).with_context(
+                        "--semantic-provider=fastembed requires the \"fastembed\" Cargo feature",
+                    ),
+                );
             }
         }
         other => {
-            return Err(RagloomError::from_kind(RagloomErrorKind::InvalidInput).with_context(
-                format!("invalid --semantic-provider: {other} (expected: adapter|fastembed)"),
-            ));
+            return Err(
+                RagloomError::from_kind(RagloomErrorKind::InvalidInput).with_context(format!(
+                    "invalid --semantic-provider: {other} (expected: adapter|fastembed)"
+                )),
+            );
         }
     }
 
@@ -308,9 +312,11 @@ pub fn parse_args(args: &[String]) -> Result<RunConfig, RagloomError> {
         .transpose()?
         .unwrap_or(95);
     if !(1..=99).contains(&semantic_percentile) {
-        return Err(RagloomError::from_kind(RagloomErrorKind::InvalidInput).with_context(
-            format!("--semantic-percentile must be in 1..=99, got {semantic_percentile}"),
-        ));
+        return Err(
+            RagloomError::from_kind(RagloomErrorKind::InvalidInput).with_context(format!(
+                "--semantic-percentile must be in 1..=99, got {semantic_percentile}"
+            )),
+        );
     }
 
     Ok(RunConfig {
@@ -481,22 +487,24 @@ async fn try_main() -> Result<(), RagloomError> {
     let chunker: std::sync::Arc<dyn Chunker> = if cfg.chunker_mode == "router"
         && cfg.enable_semantic
     {
-        let signal: std::sync::Arc<dyn SemanticSignalProvider> = match cfg.semantic_provider.as_str() {
-            "adapter" => std::sync::Arc::new(EmbeddingProviderAdapter::new(
-                std::sync::Arc::clone(&embedding),
-                embed_fingerprint.clone(),
-            )),
-            #[cfg(feature = "fastembed")]
-            "fastembed" => std::sync::Arc::new(
-                ragloom::transform::chunker::FastembedSignalProvider::new().map_err(|e| {
-                    RagloomError::new(RagloomErrorKind::Config, e).with_context("fastembed init")
-                })?,
-            ),
-            other => {
-                return Err(RagloomError::from_kind(RagloomErrorKind::InvalidInput)
-                    .with_context(format!("unsupported --semantic-provider: {other}")));
-            }
-        };
+        let signal: std::sync::Arc<dyn SemanticSignalProvider> =
+            match cfg.semantic_provider.as_str() {
+                "adapter" => std::sync::Arc::new(EmbeddingProviderAdapter::new(
+                    std::sync::Arc::clone(&embedding),
+                    embed_fingerprint.clone(),
+                )),
+                #[cfg(feature = "fastembed")]
+                "fastembed" => std::sync::Arc::new(
+                    ragloom::transform::chunker::FastembedSignalProvider::new().map_err(|e| {
+                        RagloomError::new(RagloomErrorKind::Config, e)
+                            .with_context("fastembed init")
+                    })?,
+                ),
+                other => {
+                    return Err(RagloomError::from_kind(RagloomErrorKind::InvalidInput)
+                        .with_context(format!("unsupported --semantic-provider: {other}")));
+                }
+            };
         let semantic_chunker: std::sync::Arc<dyn Chunker> = std::sync::Arc::new(
             SemanticChunker::new(signal, rec_cfg, cfg.semantic_percentile).map_err(|e| {
                 RagloomError::new(RagloomErrorKind::Config, e)
@@ -510,8 +518,7 @@ async fn try_main() -> Result<(), RagloomError> {
     } else {
         match cfg.chunker_mode.as_str() {
             "router" => std::sync::Arc::new(default_router(rec_cfg).map_err(|e| {
-                RagloomError::new(RagloomErrorKind::Config, e)
-                    .with_context("invalid router config")
+                RagloomError::new(RagloomErrorKind::Config, e).with_context("invalid router config")
             })?),
             "single" => {
                 let kind = cfg.chunker_single.as_deref().unwrap();

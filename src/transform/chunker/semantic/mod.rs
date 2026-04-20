@@ -26,7 +26,7 @@ use super::recursive::{RecursiveChunker, RecursiveConfig};
 use super::size::SizeMetric;
 use super::{Chunk, ChunkHint, ChunkedDocument, Chunker};
 
-use self::sentence::{sentences, Sentence};
+use self::sentence::{Sentence, sentences};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SemanticConfig {
@@ -148,10 +148,7 @@ impl Chunker for SemanticChunker {
             return self.fallback_recursive(text);
         }
 
-        let inputs: Vec<String> = sentence_list
-            .iter()
-            .map(|s| s.text.to_string())
-            .collect();
+        let inputs: Vec<String> = sentence_list.iter().map(|s| s.text.to_string()).collect();
         let embeds = self.signal.embed(&inputs).map_err(ChunkError::Semantic)?;
         if embeds.len() != sentence_list.len() {
             return Err(ChunkError::Semantic(SemanticError::Provider(format!(
@@ -190,7 +187,12 @@ impl Chunker for SemanticChunker {
         );
 
         let groups = build_groups(&sentence_list, &split_at);
-        let groups = merge_for_min_size(groups, &sentence_list, self.config.min_size, self.config.metric);
+        let groups = merge_for_min_size(
+            groups,
+            &sentence_list,
+            self.config.min_size,
+            self.config.metric,
+        );
 
         let mut chunks: Vec<Chunk> = Vec::new();
         let mut next_index = 0usize;
@@ -303,22 +305,18 @@ fn merge_for_min_size(
     let mut merged: Vec<(usize, usize)> = Vec::new();
     for g in groups {
         let size = group_size(g, sentences, metric);
-        if size < min_size {
-            if let Some(prev) = merged.last_mut() {
-                prev.1 = g.1;
-                continue;
-            }
+        if size < min_size
+            && let Some(prev) = merged.last_mut()
+        {
+            prev.1 = g.1;
+            continue;
         }
         merged.push(g);
     }
     merged
 }
 
-fn group_size(
-    g: (usize, usize),
-    sentences: &[Sentence<'_>],
-    metric: SizeMetric,
-) -> usize {
+fn group_size(g: (usize, usize), sentences: &[Sentence<'_>], metric: SizeMetric) -> usize {
     let _ = metric; // chars metric only for now
     sentences
         .get(g.0..=g.1)
@@ -337,7 +335,10 @@ mod tests {
 
     impl MockSignal {
         fn new(vectors: Vec<Vec<f32>>) -> Self {
-            Self { vectors, fingerprint: "mock:test" }
+            Self {
+                vectors,
+                fingerprint: "mock:test",
+            }
         }
     }
 
@@ -346,11 +347,18 @@ mod tests {
             assert_eq!(inputs.len(), self.vectors.len(), "mock got wrong count");
             Ok(self.vectors.clone())
         }
-        fn fingerprint(&self) -> &str { self.fingerprint }
+        fn fingerprint(&self) -> &str {
+            self.fingerprint
+        }
     }
 
     fn cfg(max: usize, min: usize) -> RecursiveConfig {
-        RecursiveConfig { metric: SizeMetric::Chars, max_size: max, min_size: min, overlap: 0 }
+        RecursiveConfig {
+            metric: SizeMetric::Chars,
+            max_size: max,
+            min_size: min,
+            overlap: 0,
+        }
     }
 
     #[test]
@@ -394,7 +402,9 @@ mod tests {
         ];
         let mock = Arc::new(MockSignal::new(vectors));
         let c = SemanticChunker::new(mock, cfg(1000, 0), 50).unwrap();
-        let doc = c.chunk("First A. First B. Second A. Second B.", &ChunkHint::none()).unwrap();
+        let doc = c
+            .chunk("First A. First B. Second A. Second B.", &ChunkHint::none())
+            .unwrap();
         assert_eq!(doc.chunks.len(), 2, "got: {:?}", doc.chunks);
     }
 
@@ -424,10 +434,14 @@ mod tests {
             fn embed(&self, _: &[String]) -> Result<Vec<Vec<f32>>, SemanticError> {
                 Ok(vec![vec![1.0, 0.0]])
             }
-            fn fingerprint(&self) -> &str { "loose" }
+            fn fingerprint(&self) -> &str {
+                "loose"
+            }
         }
         let c = SemanticChunker::new(Arc::new(LooseMock), cfg(1000, 0), 50).unwrap();
-        let err = c.chunk("A. B. C.", &ChunkHint::none()).expect_err("mismatch");
+        let err = c
+            .chunk("A. B. C.", &ChunkHint::none())
+            .expect_err("mismatch");
         assert!(matches!(err, ChunkError::Semantic(_)));
     }
 

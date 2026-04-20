@@ -42,7 +42,7 @@ impl SemanticSignalProvider for FastembedSignalProvider {
             .lock()
             .map_err(|e| SemanticError::Provider(format!("fastembed lock poisoned: {e}")))?;
         guard
-            .embed(inputs.to_vec(), None)
+            .embed(inputs, None)
             .map_err(|e| SemanticError::Provider(format!("fastembed embed: {e}")))
     }
 

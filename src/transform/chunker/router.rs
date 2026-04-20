@@ -153,9 +153,8 @@ pub fn semantic_router(
 ) -> ChunkResult<ChunkerRouter> {
     use super::code::{CodeChunker, Language};
 
-    let mk_code = |lang| -> ChunkResult<Arc<dyn Chunker>> {
-        Ok(Arc::new(CodeChunker::new(lang, base)?))
-    };
+    let mk_code =
+        |lang| -> ChunkResult<Arc<dyn Chunker>> { Ok(Arc::new(CodeChunker::new(lang, base)?)) };
 
     let rust = mk_code(Language::Rust)?;
     let py = mk_code(Language::Python)?;
@@ -263,18 +262,24 @@ mod semantic_tests {
         fn embed(&self, inputs: &[String]) -> Result<Vec<Vec<f32>>, SemanticError> {
             Ok(inputs.iter().map(|_| vec![1.0_f32, 0.0]).collect())
         }
-        fn fingerprint(&self) -> &str { "stub:router" }
+        fn fingerprint(&self) -> &str {
+            "stub:router"
+        }
     }
 
     fn cfg() -> RecursiveConfig {
-        RecursiveConfig { metric: SizeMetric::Chars, max_size: 1000, min_size: 0, overlap: 0 }
+        RecursiveConfig {
+            metric: SizeMetric::Chars,
+            max_size: 1000,
+            min_size: 0,
+            overlap: 0,
+        }
     }
 
     #[test]
     fn txt_routes_to_semantic_chunker() {
-        let semantic: Arc<dyn Chunker> = Arc::new(
-            SemanticChunker::new(Arc::new(StubSignal), cfg(), 95).unwrap(),
-        );
+        let semantic: Arc<dyn Chunker> =
+            Arc::new(SemanticChunker::new(Arc::new(StubSignal), cfg(), 95).unwrap());
         let router = semantic_router(cfg(), semantic).unwrap();
         let hint = ChunkHint::from_path("/tmp/notes.txt");
         let doc = router.chunk("A. B. C.", &hint).unwrap();
@@ -283,9 +288,8 @@ mod semantic_tests {
 
     #[test]
     fn rs_keeps_code_rust_chunker() {
-        let semantic: Arc<dyn Chunker> = Arc::new(
-            SemanticChunker::new(Arc::new(StubSignal), cfg(), 95).unwrap(),
-        );
+        let semantic: Arc<dyn Chunker> =
+            Arc::new(SemanticChunker::new(Arc::new(StubSignal), cfg(), 95).unwrap());
         let router = semantic_router(cfg(), semantic).unwrap();
         let hint = ChunkHint::from_path("/tmp/main.rs");
         let doc = router.chunk("fn a() {}\nfn b() {}\n", &hint).unwrap();
@@ -294,9 +298,8 @@ mod semantic_tests {
 
     #[test]
     fn md_routes_to_semantic_chunker() {
-        let semantic: Arc<dyn Chunker> = Arc::new(
-            SemanticChunker::new(Arc::new(StubSignal), cfg(), 95).unwrap(),
-        );
+        let semantic: Arc<dyn Chunker> =
+            Arc::new(SemanticChunker::new(Arc::new(StubSignal), cfg(), 95).unwrap());
         let router = semantic_router(cfg(), semantic).unwrap();
         let hint = ChunkHint::from_path("/tmp/notes.md");
         let doc = router.chunk("# hi\n\nA. B.", &hint).unwrap();

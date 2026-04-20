@@ -6,7 +6,7 @@
 
 use proptest::prelude::*;
 use ragloom::transform::chunker::semantic::{
-    signal::SemanticError, SemanticChunker, SemanticSignalProvider,
+    SemanticChunker, SemanticSignalProvider, signal::SemanticError,
 };
 use ragloom::transform::chunker::{
     ChunkHint, Chunker, CodeChunker, MarkdownChunker,
@@ -151,15 +151,23 @@ impl SemanticSignalProvider for ConstantSignal {
     fn embed(&self, inputs: &[String]) -> Result<Vec<Vec<f32>>, SemanticError> {
         Ok(inputs.iter().map(|_| vec![1.0_f32, 0.0]).collect())
     }
-    fn fingerprint(&self) -> &str { "const:proptest" }
+    fn fingerprint(&self) -> &str {
+        "const:proptest"
+    }
 }
 
 fn semantic_chunker(max: usize) -> SemanticChunker {
     SemanticChunker::new(
         Arc::new(ConstantSignal),
-        RecursiveConfig { metric: SizeMetric::Chars, max_size: max, min_size: 0, overlap: 0 },
+        RecursiveConfig {
+            metric: SizeMetric::Chars,
+            max_size: max,
+            min_size: 0,
+            overlap: 0,
+        },
         95,
-    ).unwrap()
+    )
+    .unwrap()
 }
 
 proptest! {
