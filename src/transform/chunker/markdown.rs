@@ -67,6 +67,11 @@ impl MarkdownChunker {
 }
 
 impl Chunker for MarkdownChunker {
+    #[tracing::instrument(
+        name = "ragloom.chunker.markdown.chunk",
+        skip(self, text, _hint),
+        fields(bytes = text.len(), strategy = %self.fingerprint)
+    )]
     fn chunk(&self, text: &str, _hint: &ChunkHint<'_>) -> ChunkResult<ChunkedDocument> {
         if text.is_empty() {
             return Ok(ChunkedDocument {

@@ -64,6 +64,15 @@ impl CodeChunker {
 }
 
 impl Chunker for CodeChunker {
+    #[tracing::instrument(
+        name = "ragloom.chunker.code.chunk",
+        skip(self, text, _hint),
+        fields(
+            bytes = text.len(),
+            lang = self.lang.as_fingerprint(),
+            strategy = %self.fingerprint,
+        )
+    )]
     fn chunk(&self, text: &str, _hint: &ChunkHint<'_>) -> ChunkResult<ChunkedDocument> {
         if text.is_empty() {
             return self.finalise(Vec::new());
