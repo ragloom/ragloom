@@ -46,3 +46,19 @@
   `doc.strategy_fingerprint` from the returned document.
 - Point-ID spaces for `.md` and source-code files change on first Phase 2
   run; drop or GC old Qdrant collections if you want a clean slate.
+
+### Added (Phase 3)
+
+- `SemanticSignalProvider` sync trait with `EmbeddingProviderAdapter`
+  bridging the async `EmbeddingProvider`.
+- `SemanticChunker` splits prose at p95 adjacent-sentence cosine-distance
+  peaks (default percentile, tunable).
+- Optional `fastembed` Cargo feature for local ONNX sentence embeddings.
+- `--enable-semantic`, `--semantic-provider`, `--semantic-percentile` CLI flags.
+
+### Migration (Phase 3)
+
+- Enabling `--enable-semantic` moves `.md` / `.txt` documents into a new
+  `semantic:v1|…` point-ID space. Phase 2 recursive / markdown points remain
+  untouched but will not be re-associated.
+- The `Chunker` trait is unchanged; Phase 2 callers are unaffected.

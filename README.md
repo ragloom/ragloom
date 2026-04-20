@@ -29,6 +29,12 @@ The project is split into a reusable Rust library and a thin CLI runner. The lib
   fall back to the Phase 1 recursive chunker.
 - Per-chunker strategy fingerprints (`markdown:v1|…`, `code:v1|lang=rust|…`)
   keep Markdown, code, and prose in disjoint point-ID spaces.
+- Opt-in **semantic chunking** (`--enable-semantic`): sentence-level similarity
+  splitting at the p95 distance percentile. Default signal source bridges the
+  existing async embedding provider; local ONNX via
+  [`fastembed`](https://github.com/Anush008/fastembed-rs) is available behind
+  the `fastembed` Cargo feature. Semantic fingerprints (`semantic:v1|…`) open
+  a distinct point-ID space.
 
 ## Architecture
 
@@ -123,6 +129,26 @@ The point-ID hashing now includes the chunker strategy fingerprint. Qdrant
 collections populated by earlier ragloom builds will retain their old points,
 but new runs will write to a disjoint ID space. Drop or GC the old collection
 if you want a clean state.
+
+### Semantic (opt-in)
+
+Enable with `--enable-semantic` (default: off). When enabled, the Router
+replaces the `RecursiveChunker` fallback and Markdown chunker with a
+`SemanticChunker` that splits prose at topical boundaries. Source-code
+extensions continue to use the Phase 2 CodeChunker.
+
+| Flag | Values | Default |
+| --- | --- | --- |
+| `--enable-semantic` | flag | off |
+| `--semantic-provider` | `adapter`, `fastembed` | `adapter` |
+| `--semantic-percentile` | `1..=99` | `95` |
+
+`adapter` reuses your configured `--embed-backend` (OpenAI or HTTP). Every
+sentence costs one embedding call — plan your API budget accordingly.
+
+`fastembed` runs `sentence-transformers/all-MiniLM-L6-v2` locally (384 dim,
+zero API cost). Build with `cargo build --features fastembed`. First run
+downloads ~25 MB of model weights into `~/.cache/.fastembed_cache/`.
 
 ## Quick Start
 
