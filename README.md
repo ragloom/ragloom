@@ -17,6 +17,12 @@ The project is split into a reusable Rust library and a thin CLI runner. The lib
 - Structured observability with pretty or JSON tracing output
 - Replaceable embedding and sink backends through traits
 - Integration and concurrency tests for runtime, chunking, observability, and sink behavior
+- Pluggable chunker with SIMD-accelerated byte scanning (powered by
+  [`chonkie-inc/chunk`](https://github.com/chonkie-inc/chunk)) and token-based
+  sizing via `tiktoken-rs` (`cl100k_base`)
+- Deterministic point IDs derived from `(canonical_path, chunk_index,
+  chunker_strategy_fingerprint)` — upgrading chunker parameters cleanly opens a
+  new ID space instead of silently colliding with older points
 
 ## Architecture
 
@@ -59,6 +65,32 @@ Ragloom currently focuses on a small, explicit MVP:
 - In-memory WAL only
 
 That makes the current binary a good fit for prototyping, local automation, and validating ingestion behavior before adding more operational features.
+
+## Chunker
+
+Ragloom ships with a recursive, boundary-aware chunker by default. Size can be
+measured in characters or tokens (`cl100k_base` via `tiktoken-rs`). The chosen
+strategy and its parameters are fingerprinted into every point ID, so upgrading
+parameters is an explicit versioning decision — old points will never be
+silently overwritten.
+
+### CLI flags
+
+| Flag | Values | Default |
+| --- | --- | --- |
+| `--chunker-strategy` | `recursive`, `legacy` | `recursive` |
+| `--size-metric` | `chars`, `tokens` | `chars` |
+| `--size-max` | integer | `2000` (chars) / `512` (tokens) |
+| `--size-min` | integer | `0` |
+| `--size-overlap` | integer | `0` |
+| `--tokenizer` | `tiktoken-cl100k` | `tiktoken-cl100k` |
+
+### Migration note
+
+The point-ID hashing now includes the chunker strategy fingerprint. Qdrant
+collections populated by earlier ragloom builds will retain their old points,
+but new runs will write to a disjoint ID space. Drop or GC the old collection
+if you want a clean state.
 
 ## Quick Start
 
