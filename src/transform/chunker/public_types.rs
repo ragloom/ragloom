@@ -18,7 +18,8 @@ pub struct Chunk {
     pub char_len: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChunkedDocument {
-    pub chunks: Vec<Chunk>,
+    pub chunks: Vec<super::Chunk>,
+    pub strategy_fingerprint: super::StrategyFingerprint,
 }
