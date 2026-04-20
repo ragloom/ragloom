@@ -24,7 +24,7 @@ pub use fingerprint::StrategyFingerprint;
 pub use markdown::MarkdownChunker;
 pub use public_types::{BoundaryKind, Chunk, ChunkedDocument};
 pub use recursive::RecursiveChunker;
-pub use router::{ChunkerRouter, default_router};
+pub use router::{ChunkerRouter, default_router, semantic_router};
 pub use semantic::{
     EmbeddingProviderAdapter, SemanticChunker, SemanticConfig, SemanticError,
     SemanticSignalProvider,

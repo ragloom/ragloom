@@ -144,6 +144,60 @@ pub fn default_router(base: RecursiveConfig) -> ChunkResult<ChunkerRouter> {
         .build())
 }
 
+/// Router variant that replaces Markdown and the default fallback with
+/// a caller-supplied `SemanticChunker`. Code extensions retain their
+/// Phase 2 `CodeChunker` instances.
+pub fn semantic_router(
+    base: RecursiveConfig,
+    semantic: Arc<dyn Chunker>,
+) -> ChunkResult<ChunkerRouter> {
+    use super::code::{CodeChunker, Language};
+
+    let mk_code = |lang| -> ChunkResult<Arc<dyn Chunker>> {
+        Ok(Arc::new(CodeChunker::new(lang, base)?))
+    };
+
+    let rust = mk_code(Language::Rust)?;
+    let py = mk_code(Language::Python)?;
+    let js = mk_code(Language::JavaScript)?;
+    let ts = mk_code(Language::TypeScript)?;
+    let tsx = mk_code(Language::Tsx)?;
+    let go = mk_code(Language::Go)?;
+    let java = mk_code(Language::Java)?;
+    let c_lang = mk_code(Language::C)?;
+    let cpp = mk_code(Language::Cpp)?;
+    let ruby = mk_code(Language::Ruby)?;
+    let bash = mk_code(Language::Bash)?;
+
+    Ok(ChunkerRouter::builder(Arc::clone(&semantic))
+        .register("md", Arc::clone(&semantic))
+        .register("markdown", Arc::clone(&semantic))
+        .register("mdx", Arc::clone(&semantic))
+        .register("rs", rust)
+        .register("py", Arc::clone(&py))
+        .register("pyi", py)
+        .register("js", Arc::clone(&js))
+        .register("mjs", Arc::clone(&js))
+        .register("cjs", Arc::clone(&js))
+        .register("jsx", js)
+        .register("ts", Arc::clone(&ts))
+        .register("tsx", tsx)
+        .register("go", go)
+        .register("java", java)
+        .register("c", Arc::clone(&c_lang))
+        .register("h", c_lang)
+        .register("cpp", Arc::clone(&cpp))
+        .register("cc", Arc::clone(&cpp))
+        .register("cxx", Arc::clone(&cpp))
+        .register("hpp", Arc::clone(&cpp))
+        .register("hh", Arc::clone(&cpp))
+        .register("hxx", cpp)
+        .register("rb", ruby)
+        .register("sh", Arc::clone(&bash))
+        .register("bash", bash)
+        .build())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,5 +246,60 @@ mod tests {
         let hint = ChunkHint::from_path("/tmp/MAIN.RS");
         let doc = router.chunk("fn a() {}\nfn b() {}\n", &hint).unwrap();
         assert!(doc.strategy_fingerprint.as_str().contains("lang=rust"));
+    }
+}
+
+#[cfg(test)]
+mod semantic_tests {
+    use super::*;
+    use crate::transform::chunker::semantic::{
+        SemanticChunker, SemanticSignalProvider, signal::SemanticError,
+    };
+    use crate::transform::chunker::size::SizeMetric;
+    use std::sync::Arc;
+
+    struct StubSignal;
+    impl SemanticSignalProvider for StubSignal {
+        fn embed(&self, inputs: &[String]) -> Result<Vec<Vec<f32>>, SemanticError> {
+            Ok(inputs.iter().map(|_| vec![1.0_f32, 0.0]).collect())
+        }
+        fn fingerprint(&self) -> &str { "stub:router" }
+    }
+
+    fn cfg() -> RecursiveConfig {
+        RecursiveConfig { metric: SizeMetric::Chars, max_size: 1000, min_size: 0, overlap: 0 }
+    }
+
+    #[test]
+    fn txt_routes_to_semantic_chunker() {
+        let semantic: Arc<dyn Chunker> = Arc::new(
+            SemanticChunker::new(Arc::new(StubSignal), cfg(), 95).unwrap(),
+        );
+        let router = semantic_router(cfg(), semantic).unwrap();
+        let hint = ChunkHint::from_path("/tmp/notes.txt");
+        let doc = router.chunk("A. B. C.", &hint).unwrap();
+        assert!(doc.strategy_fingerprint.as_str().starts_with("semantic:v1"));
+    }
+
+    #[test]
+    fn rs_keeps_code_rust_chunker() {
+        let semantic: Arc<dyn Chunker> = Arc::new(
+            SemanticChunker::new(Arc::new(StubSignal), cfg(), 95).unwrap(),
+        );
+        let router = semantic_router(cfg(), semantic).unwrap();
+        let hint = ChunkHint::from_path("/tmp/main.rs");
+        let doc = router.chunk("fn a() {}\nfn b() {}\n", &hint).unwrap();
+        assert!(doc.strategy_fingerprint.as_str().contains("lang=rust"));
+    }
+
+    #[test]
+    fn md_routes_to_semantic_chunker() {
+        let semantic: Arc<dyn Chunker> = Arc::new(
+            SemanticChunker::new(Arc::new(StubSignal), cfg(), 95).unwrap(),
+        );
+        let router = semantic_router(cfg(), semantic).unwrap();
+        let hint = ChunkHint::from_path("/tmp/notes.md");
+        let doc = router.chunk("# hi\n\nA. B.", &hint).unwrap();
+        assert!(doc.strategy_fingerprint.as_str().starts_with("semantic:v1"));
     }
 }
