@@ -13,6 +13,14 @@
   `--size-overlap`, `--tokenizer`.
 - Structured tracing events `ragloom.chunker.recursive.*` and a `strategy`
   field on the pipeline `process_file` span.
+- Content-aware chunking: `ChunkerRouter` dispatches by extension to
+  `MarkdownChunker` (pulldown-cmark) and `CodeChunker` (tree-sitter) across
+  Rust / Python / JavaScript / TypeScript / Go / Java / C / C++ / Ruby / Bash.
+- `ChunkHint` parameter on the `Chunker` trait; `strategy_fingerprint` moved
+  onto `ChunkedDocument`.
+- CLI flags: `--chunker-mode router|single`, `--chunker-single <kind>`.
+- Structured tracing spans `ragloom.chunker.markdown.*` and
+  `ragloom.chunker.code.*` with `lang` field on code spans.
 
 ### Deprecated
 - `chunk_text`, `chunk_document`, `ChunkerConfig`, `ChunkingStrategy` — these
@@ -24,3 +32,17 @@
   **Migration:** existing Qdrant collections created with prior ragloom builds
   will retain old points but will not be re-associated with new chunks; drop
   or GC the old collection if you want a clean state.
+- **Breaking (library API only)**: `Chunker::chunk` now takes
+  `(&str, &ChunkHint)`. `Chunker::strategy_fingerprint` removed — fingerprint
+  now lives on `ChunkedDocument`.
+- Default binary chunker in `main.rs` is now the Router (`--chunker-mode=router`);
+  library callers using `PipelineExecutor::new` keep the bare `RecursiveChunker`.
+
+### Migration
+
+- External callers of `Chunker::chunk(text)` must pass `&ChunkHint::none()`
+  (or `ChunkHint::from_path(path)` for content-aware dispatch).
+- External callers reading `chunker.strategy_fingerprint()` must read
+  `doc.strategy_fingerprint` from the returned document.
+- Point-ID spaces for `.md` and source-code files change on first Phase 2
+  run; drop or GC old Qdrant collections if you want a clean slate.

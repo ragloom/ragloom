@@ -23,6 +23,12 @@ The project is split into a reusable Rust library and a thin CLI runner. The lib
 - Deterministic point IDs derived from `(canonical_path, chunk_index,
   chunker_strategy_fingerprint)` — upgrading chunker parameters cleanly opens a
   new ID space instead of silently colliding with older points
+- Content-aware chunking: `ChunkerRouter` dispatches by file extension to
+  `MarkdownChunker` (pulldown-cmark) and `CodeChunker` (tree-sitter, 10
+  languages: Rust/Python/JS/TS/Go/Java/C/C++/Ruby/Bash). Unknown file types
+  fall back to the Phase 1 recursive chunker.
+- Per-chunker strategy fingerprints (`markdown:v1|…`, `code:v1|lang=rust|…`)
+  keep Markdown, code, and prose in disjoint point-ID spaces.
 
 ## Architecture
 
@@ -84,6 +90,32 @@ silently overwritten.
 | `--size-min` | integer | `0` |
 | `--size-overlap` | integer | `0` |
 | `--tokenizer` | `tiktoken-cl100k` | `tiktoken-cl100k` |
+| `--chunker-mode` | `router`, `single` | `router` |
+| `--chunker-single` | `recursive`, `markdown`, `code:<lang>` | _(required when `--chunker-mode=single`)_ |
+
+### Router mode (default)
+
+| Extension | Chunker |
+| --- | --- |
+| `md`, `markdown`, `mdx` | `MarkdownChunker` |
+| `rs` | `CodeChunker(Rust)` |
+| `py`, `pyi` | `CodeChunker(Python)` |
+| `js`, `mjs`, `cjs`, `jsx` | `CodeChunker(JavaScript)` |
+| `ts`, `tsx` | `CodeChunker(TypeScript)` |
+| `go` | `CodeChunker(Go)` |
+| `java` | `CodeChunker(Java)` |
+| `c`, `h` | `CodeChunker(C)` |
+| `cpp`/`cc`/`cxx`/`hpp`/`hh`/`hxx` | `CodeChunker(Cpp)` |
+| `rb` | `CodeChunker(Ruby)` |
+| `sh`, `bash` | `CodeChunker(Bash)` |
+| other / no extension | `RecursiveChunker` (Phase 1 default) |
+
+### Single mode
+
+`--chunker-mode=single --chunker-single=<recursive|markdown|code:<lang>>` bypasses
+the Router. `code:rust`, `code:python`, `code:javascript`, `code:typescript`,
+`code:tsx`, `code:go`, `code:java`, `code:c`, `code:cpp`, `code:ruby`,
+`code:bash` are accepted.
 
 ### Migration note
 
