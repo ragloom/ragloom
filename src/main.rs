@@ -33,6 +33,8 @@ pub struct RunConfig {
     pub size_min: usize,
     pub size_overlap: usize,
     pub tokenizer: String,
+    pub chunker_mode: String,
+    pub chunker_single: Option<String>,
 }
 
 /// Embedding backend selection.
@@ -78,6 +80,8 @@ pub fn parse_args(args: &[String]) -> Result<RunConfig, RagloomError> {
     let mut size_min: Option<String> = None;
     let mut size_overlap: Option<String> = None;
     let mut tokenizer: Option<String> = None;
+    let mut chunker_mode: Option<String> = None;
+    let mut chunker_single: Option<String> = None;
 
     let mut iter = args.iter().skip(1);
     while let Some(arg) = iter.next() {
@@ -113,6 +117,8 @@ pub fn parse_args(args: &[String]) -> Result<RunConfig, RagloomError> {
             "--size-min" => size_min = next_value(),
             "--size-overlap" => size_overlap = next_value(),
             "--tokenizer" => tokenizer = next_value(),
+            "--chunker-mode" => chunker_mode = next_value(),
+            "--chunker-single" => chunker_single = next_value(),
             "--help" | "-h" => {
                 return Err(RagloomError::from_kind(RagloomErrorKind::InvalidInput).with_context(
                     "usage: ragloom --dir <path> --qdrant-url <url> --collection <name> [--embed-backend <openai|http>]",
@@ -247,6 +253,22 @@ pub fn parse_args(args: &[String]) -> Result<RunConfig, RagloomError> {
         }
     }
 
+    let chunker_mode = chunker_mode.unwrap_or_else(|| "router".to_string());
+    match chunker_mode.as_str() {
+        "router" | "single" => {}
+        other => {
+            return Err(
+                RagloomError::from_kind(RagloomErrorKind::InvalidInput).with_context(format!(
+                    "invalid --chunker-mode: {other} (expected: router|single)"
+                )),
+            );
+        }
+    }
+    if chunker_mode == "single" && chunker_single.is_none() {
+        return Err(RagloomError::from_kind(RagloomErrorKind::Config)
+            .with_context("--chunker-mode=single requires --chunker-single"));
+    }
+
     Ok(RunConfig {
         dir,
         embed_backend,
@@ -258,7 +280,30 @@ pub fn parse_args(args: &[String]) -> Result<RunConfig, RagloomError> {
         size_min,
         size_overlap,
         tokenizer,
+        chunker_mode,
+        chunker_single,
     })
+}
+
+fn parse_code_lang(
+    s: &str,
+) -> Result<ragloom::transform::chunker::code::Language, RagloomError> {
+    use ragloom::transform::chunker::code::Language;
+    match s {
+        "rust" => Ok(Language::Rust),
+        "python" => Ok(Language::Python),
+        "javascript" => Ok(Language::JavaScript),
+        "typescript" => Ok(Language::TypeScript),
+        "tsx" => Ok(Language::Tsx),
+        "go" => Ok(Language::Go),
+        "java" => Ok(Language::Java),
+        "c" => Ok(Language::C),
+        "cpp" => Ok(Language::Cpp),
+        "ruby" => Ok(Language::Ruby),
+        "bash" => Ok(Language::Bash),
+        other => Err(RagloomError::from_kind(RagloomErrorKind::InvalidInput)
+            .with_context(format!("unsupported language: {other}"))),
+    }
 }
 
 #[tokio::main]
@@ -374,16 +419,46 @@ async fn try_main() -> Result<(), RagloomError> {
         );
     }
 
-    let chunker: std::sync::Arc<dyn ragloom::transform::chunker::Chunker> =
-        match cfg.chunker_strategy.as_str() {
-            "recursive" | "legacy" => std::sync::Arc::new(
-                ragloom::transform::chunker::RecursiveChunker::new(rec_cfg).map_err(|e| {
+    use ragloom::transform::chunker::{
+        Chunker, MarkdownChunker, default_router, recursive::RecursiveChunker,
+    };
+
+    let chunker: std::sync::Arc<dyn Chunker> = match cfg.chunker_mode.as_str() {
+        "router" => std::sync::Arc::new(default_router(rec_cfg).map_err(|e| {
+            RagloomError::new(RagloomErrorKind::Config, e).with_context("invalid router config")
+        })?),
+        "single" => {
+            let kind = cfg.chunker_single.as_deref().unwrap();
+            match kind {
+                "recursive" => std::sync::Arc::new(RecursiveChunker::new(rec_cfg).map_err(
+                    |e| {
+                        RagloomError::new(RagloomErrorKind::Config, e)
+                            .with_context("invalid chunker config")
+                    },
+                )?),
+                "markdown" => std::sync::Arc::new(MarkdownChunker::new(rec_cfg).map_err(|e| {
                     RagloomError::new(RagloomErrorKind::Config, e)
-                        .with_context("invalid chunker config")
-                })?,
-            ),
-            _ => unreachable!("validated in parse_args"),
-        };
+                        .with_context("invalid markdown config")
+                })?),
+                s if s.starts_with("code:") => {
+                    let lang = parse_code_lang(&s[5..])?;
+                    std::sync::Arc::new(
+                        ragloom::transform::chunker::CodeChunker::new(lang, rec_cfg).map_err(
+                            |e| {
+                                RagloomError::new(RagloomErrorKind::Config, e)
+                                    .with_context("invalid code config")
+                            },
+                        )?,
+                    )
+                }
+                other => {
+                    return Err(RagloomError::from_kind(RagloomErrorKind::InvalidInput)
+                        .with_context(format!("invalid --chunker-single: {other}")));
+                }
+            }
+        }
+        _ => unreachable!("validated in parse_args"),
+    };
 
     let pipeline = PipelineExecutor::with_chunker(
         embedding,
@@ -479,6 +554,8 @@ mod tests {
                 size_min: 0,
                 size_overlap: 0,
                 tokenizer: "tiktoken-cl100k".to_string(),
+                chunker_mode: "router".to_string(),
+                chunker_single: None,
             }
         );
     }
