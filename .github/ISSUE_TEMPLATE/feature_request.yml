@@ -1,24 +1,77 @@
-name: Feature Request
-description: Propose a runtime, platform, or workflow enhancement.
-title: "[feature] "
-labels: ["enhancement"]
+name: Feature request
+description: Suggest an idea or improvement
+title: "[Feature]: "
+labels: ["enhancement", "needs triage"]
+assignees: []
+
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement.
+        Please describe the problem, use case, and proposed solution clearly.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I have searched existing issues and discussions.
+          required: true
+        - label: This request is related to a real use case or problem.
+          required: true
+
   - type: textarea
     id: problem
     attributes:
       label: Problem
-      description: What limitation or pain point are you trying to remove?
+      description: What problem are you trying to solve?
+      placeholder: |
+        I'm frustrated when ...
+        It would be useful if ...
     validations:
       required: true
+
   - type: textarea
-    id: proposal
+    id: solution
     attributes:
-      label: Proposal
-      description: Describe the smallest useful change.
+      label: Proposed solution
+      description: Describe the feature or change you would like to see.
     validations:
       required: true
+
   - type: textarea
     id: alternatives
     attributes:
-      label: Alternatives Considered
-      description: List any alternatives or why they are insufficient.
+      label: Alternatives considered
+      description: Describe any alternative solutions or workarounds you have considered.
+    validations:
+      required: false
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case
+      description: Explain who would benefit from this and how.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: impact
+    attributes:
+      label: Impact
+      description: How important is this feature to you?
+      options:
+        - Nice to have
+        - Important
+        - Blocking my usage
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add mockups, examples, links, or related issues if helpful.
+    validations:
+      required: false

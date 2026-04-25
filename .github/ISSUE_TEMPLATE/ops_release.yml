@@ -1,24 +1,206 @@
-name: Ops / Release
-description: Report release, artifact, supply-chain, or registry issues.
-title: "[ops] "
-labels: ["ops", "release"]
+name: Ops release
+description: Request or track an operational release
+title: "[Ops Release]: "
+labels: ["ops", "release", "needs triage"]
+assignees: []
+
 body:
-  - type: textarea
-    id: impact
+  - type: markdown
     attributes:
-      label: Impact
-      description: Explain how the issue affects release consumers or maintainers.
+      value: |
+        Use this template to plan, request, or track an operational release.
+        Please include enough information for reviewers and maintainers to understand the scope, risk, rollout, and rollback plan.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I have confirmed that the release target, scope, and timing are correct.
+          required: true
+        - label: I have reviewed related changes, issues, or pull requests.
+          required: true
+        - label: I have prepared a rollback or mitigation plan.
+          required: true
+
+  - type: input
+    id: release-version
+    attributes:
+      label: Release version or identifier
+      description: Version, tag, commit SHA, deployment ID, or release name.
+      placeholder: "v1.2.3 / 2025-01-31 / commit SHA"
     validations:
       required: true
-  - type: textarea
-    id: details
+
+  - type: dropdown
+    id: release-type
     attributes:
-      label: Details
-      description: Include affected artifact names, tags, registries, or failing checks.
+      label: Release type
+      description: What kind of release is this?
+      options:
+        - Production release
+        - Staging release
+        - Hotfix
+        - Patch release
+        - Dependency update
+        - Infrastructure change
+        - Configuration change
+        - Documentation release
+        - Other
     validations:
       required: true
+
   - type: textarea
-    id: evidence
+    id: summary
     attributes:
-      label: Evidence
-      description: Paste logs, checksums, registry errors, or provenance details.
+      label: Summary
+      description: Briefly describe what is being released.
+      placeholder: |
+        This release includes...
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: List the components, services, packages, modules, or environments affected.
+      placeholder: |
+        - Component:
+        - Service:
+        - Environment:
+        - Users affected:
+    validations:
+      required: true
+
+  - type: textarea
+    id: related-work
+    attributes:
+      label: Related issues, pull requests, or changelog
+      description: Link related issues, PRs, commits, changelog entries, or release notes.
+      placeholder: |
+        - Closes #
+        - Related PR:
+        - Changelog:
+    validations:
+      required: false
+
+  - type: textarea
+    id: deployment-plan
+    attributes:
+      label: Deployment plan
+      description: Describe the release steps in order.
+      placeholder: |
+        1. Create release tag
+        2. Build artifacts
+        3. Deploy to staging
+        4. Run smoke tests
+        5. Deploy to production
+        6. Monitor metrics and logs
+    validations:
+      required: true
+
+  - type: textarea
+    id: validation-plan
+    attributes:
+      label: Validation plan
+      description: How will you verify the release succeeded?
+      placeholder: |
+        - Check health endpoint
+        - Run smoke tests
+        - Verify logs
+        - Confirm key user flows
+        - Monitor error rate and latency
+    validations:
+      required: true
+
+  - type: textarea
+    id: rollback-plan
+    attributes:
+      label: Rollback plan
+      description: How can this release be reverted or mitigated if something goes wrong?
+      placeholder: |
+        - Revert to version:
+        - Rollback command:
+        - Config flag to disable:
+        - Data migration rollback:
+        - Owner responsible:
+    validations:
+      required: true
+
+  - type: dropdown
+    id: risk-level
+    attributes:
+      label: Risk level
+      description: Estimate the operational risk of this release.
+      options:
+        - Low
+        - Medium
+        - High
+        - Critical
+    validations:
+      required: true
+
+  - type: textarea
+    id: risk-notes
+    attributes:
+      label: Risk notes
+      description: Describe known risks, dependencies, migrations, downtime, or compatibility concerns.
+      placeholder: |
+        - Database migration:
+        - Breaking changes:
+        - Downtime expected:
+        - External dependencies:
+        - Feature flags:
+    validations:
+      required: false
+
+  - type: input
+    id: release-window
+    attributes:
+      label: Release window
+      description: Planned date and time for the release.
+      placeholder: "YYYY-MM-DD HH:mm timezone"
+    validations:
+      required: false
+
+  - type: textarea
+    id: owners
+    attributes:
+      label: Owners and reviewers
+      description: Who is responsible for this release and who should review it?
+      placeholder: |
+        - Release owner:
+        - Reviewer:
+        - On-call:
+    validations:
+      required: false
+
+  - type: textarea
+    id: communication-plan
+    attributes:
+      label: Communication plan
+      description: Where should release status, incidents, or follow-ups be communicated?
+      placeholder: |
+        - GitHub issue:
+        - Discussion:
+        - Slack/Discord:
+        - Status page:
+        - Release notes:
+    validations:
+      required: false
+
+  - type: textarea
+    id: post-release
+    attributes:
+      label: Post-release checklist
+      description: Tasks to complete after the release.
+      placeholder: |
+        - [ ] Release completed
+        - [ ] Smoke tests passed
+        - [ ] Metrics reviewed
+        - [ ] Logs reviewed
+        - [ ] Release notes published
+        - [ ] Follow-up issues created
+    validations:
+      required: false
