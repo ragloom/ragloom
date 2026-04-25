@@ -252,7 +252,13 @@ Determine the correct target remote and branch:
 
 If the repository’s default branch is not `main`, use the actual default branch, such as `master`, `develop`, or another remote default branch.
 
-Read the PR template:
+Check if a PR template exists:
+
+```bash
+ls .github/pull_request_template.md  # or find .github -iname "*pull_request_template*"
+```
+
+If a pull_request_template.md exists, read it:
 
 ```bash
 cat .github/pull_request_template.md
