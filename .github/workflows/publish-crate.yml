@@ -2,7 +2,30 @@ name: publish-crate
 
 on:
   workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      tag:
+        required: true
+        type: string
+      ref:
+        required: true
+        type: string
   workflow_dispatch:
+    inputs:
+      version:
+        description: Crate version from Cargo.toml (for example 0.1.0)
+        required: true
+        type: string
+      tag:
+        description: Release tag to verify before publishing (for example v0.1.0)
+        required: true
+        type: string
+      ref:
+        description: Git ref to checkout before publishing (for example v0.1.0)
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -14,12 +37,21 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
+
+      - name: Verify release version
+        env:
+          EXPECTED_VERSION: ${{ inputs.version }}
+          EXPECTED_TAG: ${{ inputs.tag }}
+        run: python .github/scripts/verify-release-version.py
 
       - name: Package crate
         run: cargo package
