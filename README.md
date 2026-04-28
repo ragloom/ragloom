@@ -1,409 +1,437 @@
 # Ragloom
 
-Minimalist RAG ingestion for local files, deterministic pipelines, and Qdrant-ready vector indexing.
+A tiny Logstash-like ingestion daemon for RAG.
+
+Point Ragloom at a folder. It watches local files, chunks documents, generates embeddings, and upserts deterministic points into Qdrant.
+
+Use it when you want a small, inspectable ingestion pipeline instead of a full RAG platform.
 
 ![Rust](https://img.shields.io/badge/Rust-2024-000000?logo=rust)
-![RAG](https://img.shields.io/badge/RAG-ingestion-1f6feb)
+![Status](https://img.shields.io/badge/status-alpha-b36b00)
 
-Ragloom is a minimalist RAG ingestion engine for local files. It scans a directory, detects changed file versions, loads UTF-8 text, chunks it, sends chunks to an embedding backend, and upserts deterministic points into Qdrant.
+## Why Ragloom?
 
-The project is split into a reusable Rust library and a thin CLI runner. The library exposes small traits for sources, document loading, embedding providers, and sinks so the pipeline can stay easy to test and extend.
+Most RAG tools are full frameworks or platforms. Ragloom only handles ingestion.
 
-## Features
+It is built for developers who want to:
 
-- Minimal end-to-end ingestion pipeline for local files
-- Deterministic point IDs for idempotent Qdrant upserts
-- Polling-based file discovery with cheap file-version fingerprints
-- Structured observability with pretty or JSON tracing output
-- Replaceable embedding and sink backends through traits
-- Integration and concurrency tests for runtime, chunking, observability, and sink behavior
-- Pluggable chunker with SIMD-accelerated byte scanning (powered by
-  [`chonkie-inc/chunk`](https://github.com/chonkie-inc/chunk)) and token-based
-  sizing via `tiktoken-rs` (`cl100k_base`)
-- Deterministic point IDs derived from `(canonical_path, chunk_index,
-  chunker_strategy_fingerprint)` — upgrading chunker parameters cleanly opens a
-  new ID space instead of silently colliding with older points
-- Content-aware chunking: `ChunkerRouter` dispatches by file extension to
-  `MarkdownChunker` (pulldown-cmark) and `CodeChunker` (tree-sitter, 10
-  languages: Rust/Python/JS/TS/Go/Java/C/C++/Ruby/Bash). Unknown file types
-  fall back to the Phase 1 recursive chunker.
-- Per-chunker strategy fingerprints (`markdown:v1|…`, `code:v1|lang=rust|…`)
-  keep Markdown, code, and prose in disjoint point-ID spaces.
-- Opt-in **semantic chunking** (`--enable-semantic`): sentence-level similarity
-  splitting at the p95 distance percentile. Default signal source bridges the
-  existing async embedding provider; local ONNX via
-  [`fastembed`](https://github.com/Anush008/fastembed-rs) is available behind
-  the `fastembed` Cargo feature. Semantic fingerprints (`semantic:v1|…`) open
-  a distinct point-ID space.
+- keep a vector database in sync with local documents
+- rerun ingestion safely without duplicate chunks
+- version chunking strategies explicitly
+- inspect what was indexed and why
+- avoid adopting a full RAG framework
 
-## Architecture
+## Status
 
-The runtime is organized as a small in-process pipeline:
+Ragloom is currently alpha software.
 
-```text
-DirectoryScannerSource
-  -> Planner
-  -> WAL work items
-  -> AsyncRuntime queue
-  -> PipelineExecutor
-     -> DocumentLoader
-     -> Chunker
-     -> EmbeddingProvider
-     -> Sink
-  -> Sink acknowledgement
-```
+It is useful for local-folder to Qdrant ingestion experiments and small automation tasks.
 
-Core crates and modules:
+Supported today:
 
-- `source`: discovery of file versions from the filesystem
-- `pipeline`: planning, runtime loop, worker execution, and acknowledgements
-- `doc`: document loading abstraction and filesystem UTF-8 loader
-- `transform`: chunking and chunk metadata generation
-- `embed`: OpenAI and generic HTTP embedding clients
-- `sink`: vector sink abstraction and Qdrant implementation
-- `state`: in-memory WAL record types used by the MVP runtime
-- `observability`: tracing subscriber configuration from environment variables
+- local filesystem source
+- top-level files in one configured directory
+- UTF-8 text, Markdown, and source code files
+- recursive, Markdown-aware, and code-aware chunking
+- experimental semantic chunking
+- OpenAI and generic HTTP embedding APIs
+- Qdrant sink
+- deterministic point IDs
+- pretty and JSON structured logs
 
-## Current Scope
+Not supported yet:
 
-Ragloom currently focuses on a small, explicit MVP:
+- PDF or DOCX parsing
+- recursive directory scanning
+- persistent WAL
+- automatic Qdrant collection creation
+- production retry or dead-letter queues
+- built-in collection lifecycle management
 
-- Local filesystem input only
-- Polling directory scan only
-- Top-level files in the configured directory only
-- UTF-8 document loading only
-- Qdrant as the only built-in sink
-- OpenAI and generic HTTP embedding backends
-- In-memory WAL only
+## Quickstart
 
-That makes the current binary a good fit for prototyping, local automation, and validating ingestion behavior before adding more operational features.
+This example runs Ragloom from source against a local Qdrant instance and the default OpenAI embedding backend.
 
-## Chunker
-
-Ragloom ships with a recursive, boundary-aware chunker by default. Size can be
-measured in characters or tokens (`cl100k_base` via `tiktoken-rs`). The chosen
-strategy and its parameters are fingerprinted into every point ID, so upgrading
-parameters is an explicit versioning decision — old points will never be
-silently overwritten.
-
-### CLI flags
-
-| Flag | Values | Default |
-| --- | --- | --- |
-| `--chunker-strategy` | `recursive`, `legacy` | `recursive` |
-| `--size-metric` | `chars`, `tokens` | `chars` |
-| `--size-max` | integer | `2000` (chars) / `512` (tokens) |
-| `--size-min` | integer | `0` |
-| `--size-overlap` | integer | `0` |
-| `--tokenizer` | `tiktoken-cl100k` | `tiktoken-cl100k` |
-| `--chunker-mode` | `router`, `single` | `router` |
-| `--chunker-single` | `recursive`, `markdown`, `code:<lang>` | _(required when `--chunker-mode=single`)_ |
-
-### Router mode (default)
-
-| Extension | Chunker |
-| --- | --- |
-| `md`, `markdown`, `mdx` | `MarkdownChunker` |
-| `rs` | `CodeChunker(Rust)` |
-| `py`, `pyi` | `CodeChunker(Python)` |
-| `js`, `mjs`, `cjs`, `jsx` | `CodeChunker(JavaScript)` |
-| `ts`, `tsx` | `CodeChunker(TypeScript)` |
-| `go` | `CodeChunker(Go)` |
-| `java` | `CodeChunker(Java)` |
-| `c`, `h` | `CodeChunker(C)` |
-| `cpp`/`cc`/`cxx`/`hpp`/`hh`/`hxx` | `CodeChunker(Cpp)` |
-| `rb` | `CodeChunker(Ruby)` |
-| `sh`, `bash` | `CodeChunker(Bash)` |
-| other / no extension | `RecursiveChunker` (Phase 1 default) |
-
-### Single mode
-
-`--chunker-mode=single --chunker-single=<recursive|markdown|code:<lang>>` bypasses
-the Router. `code:rust`, `code:python`, `code:javascript`, `code:typescript`,
-`code:tsx`, `code:go`, `code:java`, `code:c`, `code:cpp`, `code:ruby`,
-`code:bash` are accepted.
-
-### Migration note
-
-The point-ID hashing now includes the chunker strategy fingerprint. Qdrant
-collections populated by earlier ragloom builds will retain their old points,
-but new runs will write to a disjoint ID space. Drop or GC the old collection
-if you want a clean state.
-
-### Semantic (opt-in)
-
-Enable with `--enable-semantic` (default: off). When enabled, the Router
-replaces the `RecursiveChunker` fallback and Markdown chunker with a
-`SemanticChunker` that splits prose at topical boundaries. Source-code
-extensions continue to use the Phase 2 CodeChunker.
-
-| Flag | Values | Default |
-| --- | --- | --- |
-| `--enable-semantic` | flag | off |
-| `--semantic-provider` | `adapter`, `fastembed` | `adapter` |
-| `--semantic-percentile` | `1..=99` | `95` |
-
-`adapter` reuses your configured `--embed-backend` (OpenAI or HTTP). Every
-sentence costs one embedding call — plan your API budget accordingly.
-
-`fastembed` runs `sentence-transformers/all-MiniLM-L6-v2` locally (384 dim,
-zero API cost). Build with `cargo build --features fastembed`. First run
-downloads ~25 MB of model weights into `~/.cache/.fastembed_cache/`.
-
-## Quick Start
-
-### Requirements
-
-- Rust toolchain with edition 2024 support
-- A running Qdrant instance
-- An existing Qdrant collection with a vector size that matches your embedding model
-- A directory containing UTF-8 text files
-
-Build the binary:
+### 1. Start Qdrant
 
 ```bash
+docker run -d --name ragloom-qdrant -p 6333:6333 qdrant/qdrant
+```
+
+### 2. Create a collection
+
+Ragloom does not create collections automatically. The example below assumes the default OpenAI model, `text-embedding-3-small`, which uses 1536-dimensional vectors.
+
+```bash
+curl -X PUT http://localhost:6333/collections/docs \
+  -H "Content-Type: application/json" \
+  -d '{"vectors":{"size":1536,"distance":"Cosine"}}'
+```
+
+If you use a different embedding model, create the collection with that model's vector size instead.
+
+### 3. Prepare example documents
+
+```bash
+mkdir -p docs
+printf "Ragloom watches files and indexes chunks into Qdrant.\n" > docs/intro.md
+```
+
+### 4. Run Ragloom
+
+```bash
+cargo run --release -- \
+  --dir ./docs \
+  --qdrant-url http://localhost:6333 \
+  --collection docs \
+  --openai-api-key "$OPENAI_API_KEY"
+```
+
+### 5. Expected result
+
+Success looks like this:
+
+- Ragloom starts and keeps running until you stop it with `Ctrl+C`
+- you see startup and ingestion logs instead of a `ragloom.fatal` error
+- points appear in the Qdrant collection `docs`
+
+## Installation
+
+Prebuilt binaries are not published yet. For now, install from source with Cargo.
+
+### Build from source
+
+```bash
+git clone https://github.com/ragloom/ragloom
+cd ragloom
 cargo build --release
 ```
 
-Run with the default OpenAI backend:
+The compiled binary will be available at:
 
-```bash
-ragloom \
-	--dir ./docs \
-	--qdrant-url http://localhost:6333 \
-	--collection docs \
-	--openai-api-key "$OPENAI_API_KEY"
+```text
+target/release/ragloom
 ```
 
-Run with a generic HTTP embedding service:
+### Install into Cargo's bin directory
 
 ```bash
-ragloom \
-	--dir ./docs \
-	--embed-backend http \
-	--embed-url http://localhost:8080/embed \
-	--embed-model default \
-	--qdrant-url http://localhost:6333 \
-	--collection docs
+git clone https://github.com/ragloom/ragloom
+cd ragloom
+cargo install --path .
 ```
 
-Run with a YAML config file (typed `PipelineConfig`) plus backend-specific CLI flags:
+## Configuration
+
+Ragloom supports a small typed YAML config for source, embed, and sink wiring.
+
+### Basic configuration
 
 ```yaml
-# ragloom.yaml
 source:
   root: "./docs"
+
 embed:
-  endpoint: "http://localhost:8080/embed"
+  endpoint: "https://api.openai.com/v1/embeddings"
+
 sink:
   qdrant_url: "http://localhost:6333"
   collection: "docs"
 ```
 
+Run with:
+
 ```bash
-ragloom \
-	--config ./ragloom.yaml \
-	--embed-backend http \
-	--embed-model default
+ragloom --config ./ragloom.yaml --openai-api-key "$OPENAI_API_KEY"
 ```
 
-On Windows PowerShell, the same command looks like this:
+### Generic HTTP embedding
 
-```powershell
-.\target\release\ragloom.exe `
-	--dir .\docs `
-	--qdrant-url http://localhost:6333 `
-	--collection docs `
-	--openai-api-key $env:OPENAI_API_KEY
+For a generic HTTP embedding service:
+
+```yaml
+embed:
+  endpoint: "http://localhost:8080/embed"
 ```
 
-The process runs until interrupted with Ctrl+C.
+```bash
+ragloom --config ./ragloom.yaml --embed-backend http --embed-model default
+```
 
-## CLI Usage
+### Configuration notes
 
-### Required flags
+- `--config` can provide `source.root`, `embed.endpoint`, `sink.qdrant_url`, and `sink.collection`
+- backend-specific auth still comes from CLI flags, such as `--openai-api-key`
+- chunker settings are currently configured by CLI flags, not by YAML
+- flags support both `--flag value` and `--flag=value`
+- the config file is merged with CLI flags; CLI flags take precedence
 
-- `--dir <path>`: directory to scan
-- `--qdrant-url <url>`: Qdrant base URL
-- `--collection <name>`: Qdrant collection name
+## How is Ragloom different?
 
-Use `--config <path>` to load a YAML file and satisfy these required values via:
+Ragloom is not a RAG framework, chatbot, document QA app, or observability platform.
 
-- `source.root`
-- `sink.qdrant_url`
-- `sink.collection`
+It only focuses on ingestion.
 
-CLI flags override values loaded from `--config`.
+| Tool type | Examples | Focus |
+| --- | --- | --- |
+| RAG frameworks | LangChain, LlamaIndex | app orchestration |
+| RAG platforms | RAGFlow, AnythingLLM | end-user RAG apps |
+| document parsers | Unstructured, Docling | parsing documents |
+| vector databases | Qdrant, Milvus, Weaviate | storing vectors |
+| Ragloom | - | syncing documents into a vector DB |
 
-### Embedding backend selection
+Ragloom is for people who already have an app and a vector database, but want a small ingestion process in between.
 
-`--embed-backend` defaults to `openai`.
+## Core Concepts
 
-OpenAI backend options:
+### Source
 
-- `--openai-endpoint <url>`: defaults to `https://api.openai.com/v1/embeddings` (or `embed.endpoint` from `--config` when present)
-- `--openai-api-key <key>`: required when using the OpenAI backend
-- `--openai-model <model>`: defaults to `text-embedding-3-small`
+Discovers document versions from a location such as a local folder.
 
-Generic HTTP backend options:
+### Loader
 
-- `--embed-url <url>`: required when `--embed-backend http` unless `embed.endpoint` is provided by `--config`
-- `--embed-model <model>`: defaults to `default`
+Reads document content. The built-in loader reads UTF-8 files from disk.
 
-Flags support both `--flag value` and `--flag=value` forms.
+### Chunker
 
-## Embedding Backends
+Splits documents into indexable chunks and records chunk metadata.
 
-### OpenAI
+### Embedder
 
-The built-in OpenAI client sends requests to the embeddings API using this logical shape:
+Turns chunks into vectors through OpenAI or a generic HTTP embedding API.
+
+### Sink
+
+Writes vectors and metadata into a destination such as Qdrant.
+
+### State
+
+Tracks discovered work and acknowledgements in an in-memory WAL.
+
+## Architecture
+
+```text
+local folder
+  ->
+scanner
+  ->
+planner
+  ->
+WAL work items
+  ->
+runtime queue
+  ->
+loader
+  ->
+chunker
+  ->
+embedder
+  ->
+qdrant sink
+  ->
+acknowledgement
+```
+
+The implementation is intentionally split into small modules such as `source`, `doc`, `transform`, `embed`, `sink`, `pipeline`, and `observability`, but the runtime behavior stays narrow: discover files, turn them into chunks, embed them, and upsert them.
+
+## Safe Reruns With Deterministic IDs
+
+Ragloom generates deterministic point IDs from:
+
+- canonical file path
+- chunk index
+- chunker strategy fingerprint
+
+This makes reruns safe.
+
+The same file and same chunking config produce the same point IDs. Changing chunking parameters creates a new ID space, so old chunks are not silently overwritten by new content.
+
+## Chunking
+
+Ragloom supports several chunking modes:
+
+| Mode | Use case |
+| --- | --- |
+| `recursive` | general text |
+| `markdown` | heading-aware Markdown splitting |
+| `code:<lang>` | tree-sitter based source-code splitting |
+| `semantic` | experimental sentence-level semantic splitting |
+
+By default, Ragloom runs in router mode and chooses a chunker by file extension:
+
+- `.md`, `.markdown`, `.mdx` -> Markdown chunker
+- `.rs`, `.py`, `.js`, `.ts`, `.tsx`, `.go`, `.java`, `.c`, `.cpp`, `.rb`, `.sh` -> code chunker
+- other files -> recursive chunker
+
+Useful flags:
+
+- `--chunker-mode router` keeps extension-based routing
+- `--chunker-mode single --chunker-single recursive|markdown|semantic|code:<lang>` forces one chunker
+- `--size-metric chars|tokens` chooses chunk sizing mode
+- `--size-max`, `--size-min`, and `--size-overlap` tune boundaries
+- `--enable-semantic` enables semantic chunking in router mode
+- `--semantic-provider adapter|fastembed` selects the semantic signal source
+
+Semantic chunking is opt-in. `fastembed` requires building with `--features fastembed`.
+
+## Indexed Payload
+
+Each Qdrant point includes chunk text plus metadata such as:
 
 ```json
 {
-	"model": "text-embedding-3-small",
-	"input": ["chunk one", "chunk two"]
+  "canonical_path": "file:///Users/me/docs/intro.md",
+  "doc_id": "doc_...",
+  "tenant_id": "default",
+  "file_extension": "md",
+  "size_bytes": 842,
+  "mtime_unix_secs": 1714300000,
+  "chunk_index": 0,
+  "total_chunks": 3,
+  "previous_chunk_id": null,
+  "next_chunk_id": "chunk_...",
+  "chunk_start_byte": 0,
+  "chunk_end_byte": 842,
+  "chunk_char_len": 842,
+  "chunk_text_sha256": "sha256_...",
+  "strategy_fingerprint": "markdown:v1|...",
+  "chunk_text": "..."
 }
 ```
 
-### Generic HTTP backend
-
-The generic HTTP client expects a JSON API with this request and response shape:
-
-Request:
-
-```json
-{
-	"model": "default",
-	"input": ["chunk one", "chunk two"]
-}
-```
-
-Response:
-
-```json
-{
-	"embeddings": [[1.0, 2.0], [3.0, 4.0]]
-}
-```
-
-## Qdrant Integration
-
-Ragloom writes points with deterministic IDs derived from the canonical path and chunk index. This keeps upserts idempotent and makes retries safe at the sink layer.
-
-Each point payload includes document and chunk metadata such as:
-
-- canonical file URI
-- stable document ID hash
-- file extension
-- file size and mtime
-- chunk index and total chunk count
-- previous and next chunk IDs
-- chunk byte offsets
-- chunk text length
-- chunk text hash
-- chunk text content
-
-Ragloom does not create collections automatically. You need to provision the target collection yourself with a vector size compatible with the selected embedding backend.
+This is the part of Ragloom that makes inspection easier: you can look at a point in Qdrant and see where it came from, how it was chunked, and which neighboring chunks surround it.
 
 ## Observability
 
-Logging is configured through environment variables:
+Ragloom emits `tracing` events for discovery, startup, embedding, Qdrant writes, and completion.
 
-- `RAGLOOM_LOG_FORMAT`: `pretty` or `json`, default is `pretty`
-- `RAGLOOM_LOG`: tracing filter directives, default is `info`
+Environment variables:
 
-Examples:
+- `RAGLOOM_LOG_FORMAT=pretty|json`
+- `RAGLOOM_LOG=info|debug|...`
 
-```bash
-RAGLOOM_LOG=debug cargo run -- --dir ./docs --qdrant-url http://localhost:6333 --collection docs --openai-api-key "$OPENAI_API_KEY"
-```
+Example:
 
 ```bash
-RAGLOOM_LOG_FORMAT=json RAGLOOM_LOG=info cargo run -- --dir ./docs --qdrant-url http://localhost:6333 --collection docs --openai-api-key "$OPENAI_API_KEY"
+RAGLOOM_LOG_FORMAT=json RAGLOOM_LOG=info ragloom --config ./ragloom.yaml --openai-api-key "$OPENAI_API_KEY"
 ```
 
-The runtime emits tracing events around discovery, document loading, embedding requests, sink writes, and successful ingest completion.
+Ragloom does not log secrets, API keys, or full document contents.
 
-## Library Usage
+## Roadmap
 
-The crate is designed so you can reuse the pipeline pieces directly in Rust.
+### v0.1 - First-run experience
 
-Add the dependency:
+- example environment for local Qdrant setup
+- clearer ingestion summary at runtime
+- automatic Qdrant collection creation
+- recursive directory scanning
+- release binaries
 
-```toml
-[dependencies]
-ragloom = { git = "https://github.com/ragloom/ragloom" }
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-```
+### v0.2 - More reliable daemon behavior
 
-Typical extension points:
+- persistent local state
+- retry queue
+- delete detection
+- health endpoint
+- metrics endpoint
 
-- implement `source::Source` for a new discovery backend
-- implement `doc::DocumentLoader` for remote or non-filesystem content
-- implement `embed::EmbeddingProvider` for another model provider
-- implement `sink::Sink` for another vector store or downstream system
+### v0.3 - More document coverage
 
-The current binary in `src/main.rs` is a reference composition of these traits.
-
-## Development
-
-Run the test suite:
-
-```bash
-cargo test
-```
-
-Run benchmark targets:
-
-```bash
-cargo bench
-```
-
-Run loom-specific tests:
-
-```bash
-cargo test --features loom
-```
-
-Generate coverage if you use `cargo-llvm-cov`:
-
-```bash
-cargo llvm-cov --all --lcov --output-path lcov.info
-```
+- PDF
+- HTML
+- DOCX
+- frontmatter metadata
+- external parser integrations
 
 ## Limitations
 
-- The directory scanner only scans one level and ignores nested directories.
-- File change detection uses path, size, and mtime rather than content hashing.
-- The built-in loader only reads UTF-8 files.
-- The WAL is in memory, so it does not survive process restarts.
-- There is no built-in collection management, health endpoint, retry queue, or dead-letter handling.
+Ragloom is intentionally small today.
 
-## Roadmap Ideas
+## Troubleshooting
 
-- Persistent WAL storage
-- Recursive scanning or alternate source backends
-- More sinks and embedding providers
-- Runtime config reload integration
-- Operational endpoints and richer retry controls
+### Ragloom fails to start with Qdrant connection error
 
-## Project Governance
+Make sure Qdrant is running and accessible:
 
-- See `CONTRIBUTING.md` for local verification and development expectations.
-- See `SUPPORT.md` for platform and release support policy.
-- See `SECURITY.md` for vulnerability reporting guidance.
+```bash
+curl http://localhost:6333/health
+```
+
+If using Docker, verify the container is running:
+
+```bash
+docker ps | grep qdrant
+```
+
+### Collection not found error
+
+Ragloom does not create collections automatically. Create the collection before running:
+
+```bash
+curl -X PUT http://localhost:6333/collections/docs \
+  -H "Content-Type: application/json" \
+  -d '{"vectors":{"size":1536,"distance":"Cosine"}}'
+```
+
+Adjust the vector size to match your embedding model.
+
+### Empty or missing chunks
+
+Check that your files are:
+- UTF-8 encoded
+- located in the top-level of the configured directory
+- not in subdirectories (recursive scanning is not yet supported)
+
+### OpenAI API errors
+
+Verify your API key is set correctly:
+
+```bash
+echo $OPENAI_API_KEY
+```
+
+Test the embedding endpoint directly:
+
+```bash
+curl https://api.openai.com/v1/embeddings \
+  -H "Authorization: Bearer $OPENAI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"input":"test","model":"text-embedding-3-small"}'
+```
+
+## Current limitations
+
+- only local filesystem input
+- only top-level files in the configured directory
+- only Qdrant as a built-in sink
+- only UTF-8 file loading
+- no persistent WAL yet
+- no automatic collection management yet
+- no production retry queue yet
 
 ## Contributing
 
-Issues and pull requests are welcome. Keep changes small, test-backed, and aligned with the project's minimalist design goals.
+Ragloom is maintainer-led and intentionally small.
 
-Before opening a pull request, run the local developer gate:
+Good contributions include:
+
+- bug fixes
+- tests
+- documentation
+- examples
+- small focused connectors
+- improvements to first-run experience
+
+Please open an issue before starting large features.
+
+Before opening a pull request, run:
 
 ```bash
 cargo qa
 ```
 
-`cargo qa` runs the day-to-day repository checks used during development: formatting, Clippy, and the full workspace test suite.
+See `CONTRIBUTING.md` for development expectations, `SUPPORT.md` for support policy, and `SECURITY.md` for vulnerability reporting.
 
 ## License
 

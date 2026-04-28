@@ -46,3 +46,32 @@ release text.
 The project treats Linux and Windows release targets as the formal support boundary for CI, release verification, and issue triage priority.
 
 macOS binaries are provided as convenience artifacts. They should compile and publish when practical, but breakage on macOS does not block release unless maintainers explicitly promote it to a supported target.
+
+## Getting Help
+
+### Check the documentation first
+
+- Review `README.md` for quickstart and configuration
+- Review `CONTRIBUTING.md` for development guidelines
+- Review `AGENTS.md` for AI coding agent guidance
+
+### Open an issue
+
+When opening an issue, please include:
+
+- Ragloom version (`ragloom --version` or check `Cargo.toml`)
+- Rust version (`rustc --version`)
+- Operating system and architecture
+- Qdrant version (if applicable)
+- Embedding backend and model used
+- Steps to reproduce the issue
+- Relevant log output (without API keys or secrets)
+
+### Community resources
+
+- GitHub Issues: https://github.com/ragloom/ragloom/issues
+- GitHub Discussions: https://github.com/ragloom/ragloom/discussions
+
+### Security issues
+
+For security vulnerabilities, please follow `SECURITY.md` and do **not** open a public issue.
