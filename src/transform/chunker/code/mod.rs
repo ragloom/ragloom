@@ -179,6 +179,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "Miri does not support tree-sitter FFI tests")]
     fn rust_two_functions_produce_at_least_two_chunks() {
         let text = "fn a() { 1; }\n\nfn b() { 2; }\n";
         let c = chunker(Language::Rust, 1000);
@@ -187,6 +188,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "Miri does not support tree-sitter FFI tests")]
     fn fingerprint_contains_language_and_grammar() {
         let c = chunker(Language::Rust, 1000);
         let fp = c
@@ -198,6 +200,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "Miri does not support tree-sitter FFI tests")]
     fn bash_function_parses() {
         let text = "greet() { echo hi; }\n";
         let c = chunker(Language::Bash, 1000);
