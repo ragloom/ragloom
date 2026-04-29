@@ -232,6 +232,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "Miri does not support tree-sitter FFI tests")]
     fn rust_extension_routes_to_code_rust() {
         let router = default_router(cfg()).unwrap();
         let hint = ChunkHint::from_path("/tmp/main.rs");
@@ -240,6 +241,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "Miri does not support tree-sitter FFI tests")]
     fn extension_is_case_insensitive() {
         let router = default_router(cfg()).unwrap();
         let hint = ChunkHint::from_path("/tmp/MAIN.RS");
@@ -287,6 +289,7 @@ mod semantic_tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "Miri does not support tree-sitter FFI tests")]
     fn rs_keeps_code_rust_chunker() {
         let semantic: Arc<dyn Chunker> =
             Arc::new(SemanticChunker::new(Arc::new(StubSignal), cfg(), 95).unwrap());
