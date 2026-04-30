@@ -48,8 +48,8 @@ const USAGE: &str = "usage: ragloom [--config <path>] --dir <path> --qdrant-url 
 /// Top-level CLI command selected by argument parsing.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ParsedCommand {
-    // Box the run config to satisfy clippy's `large_enum_variant` lint while
-    // still modeling early-exit CLI commands explicitly.
+    // Box the run config to keep this enum small enough for clippy's
+    // `large_enum_variant` lint while still modeling early-exit commands cleanly.
     Run(Box<RunConfig>),
     Help,
     Version,
@@ -175,14 +175,20 @@ pub fn parse_args(args: &[String]) -> Result<ParsedCommand, RagloomError> {
 
     let dir = dir
         .or_else(|| file_config.as_ref().map(|c| c.source.root.clone()))
-        .ok_or_else(|| cli_config_error("missing required value: --dir or source.root in --config"))?;
+        .ok_or_else(|| {
+            cli_config_error("missing required value: --dir or source.root in --config")
+        })?;
 
     let qdrant_url = qdrant_url
         .or_else(|| file_config.as_ref().map(|c| c.sink.qdrant_url.clone()))
-        .ok_or_else(|| cli_config_error("missing required value: --qdrant-url or sink.qdrant_url in --config"))?;
+        .ok_or_else(|| {
+            cli_config_error("missing required value: --qdrant-url or sink.qdrant_url in --config")
+        })?;
     let collection = collection
         .or_else(|| file_config.as_ref().map(|c| c.sink.collection.clone()))
-        .ok_or_else(|| cli_config_error("missing required value: --collection or sink.collection in --config"))?;
+        .ok_or_else(|| {
+            cli_config_error("missing required value: --collection or sink.collection in --config")
+        })?;
     let collection_vector_size = collection_vector_size
         .map(|s| {
             s.parse::<usize>().map_err(|e| {
