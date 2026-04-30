@@ -3,15 +3,15 @@
 //! # Why
 //! Some environments (or MVP phases) do not provide reliable filesystem event
 //! notifications. A polling scanner keeps the ingestion pipeline functional by
-//! periodically enumerating a directory and translating file metadata into
-//! stable file-version discovery events.
+//! periodically enumerating a directory tree and translating file metadata
+//! into stable file-version discovery events.
 
 use std::path::{Path, PathBuf};
 
 use crate::source::file_tailer::{FileTailer, ObservedFileMeta};
 use crate::source::{FileVersionDiscovered, Source};
 
-/// A polling source that scans a root directory (one level) for files.
+/// A polling source that scans a root directory tree for files.
 ///
 /// # Why
 /// We keep scanning concerns separate from change detection: this type only
@@ -37,19 +37,7 @@ impl DirectoryScannerSource {
     }
 
     fn observe_root_once(&mut self) {
-        let Ok(iter) = std::fs::read_dir(&self.root) else {
-            return;
-        };
-
-        for entry in iter.flatten() {
-            let Ok(file_type) = entry.file_type() else {
-                continue;
-            };
-            if !file_type.is_file() {
-                continue;
-            }
-
-            let path = entry.path();
+        for path in walk_regular_files(&self.root) {
             let Ok(meta) = std::fs::metadata(&path) else {
                 continue;
             };
@@ -69,6 +57,38 @@ impl DirectoryScannerSource {
             });
         }
     }
+}
+
+fn walk_regular_files(root: &Path) -> Vec<PathBuf> {
+    let mut pending = vec![root.to_path_buf()];
+    let mut files = Vec::new();
+
+    while let Some(dir) = pending.pop() {
+        let Ok(read_dir) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+
+        let mut entries = read_dir.flatten().collect::<Vec<_>>();
+        entries.sort_by_key(|entry| entry.path());
+
+        for entry in entries {
+            let path = entry.path();
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+
+            if file_type.is_file() {
+                files.push(path);
+                continue;
+            }
+
+            if file_type.is_dir() {
+                pending.push(path);
+            }
+        }
+    }
+
+    files
 }
 
 impl Source for DirectoryScannerSource {

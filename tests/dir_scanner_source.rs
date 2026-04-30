@@ -1,5 +1,6 @@
 use std::fs;
 use std::io::Write;
+use std::path::Path;
 use std::time::Duration;
 
 use ragloom::source::{DirectoryScannerSource, Source};
@@ -51,4 +52,77 @@ fn scanner_ignores_directories() {
 
     let events = scanner.poll();
     assert_eq!(events.len(), 0);
+}
+
+#[test]
+fn scanner_recursively_discovers_nested_files_once() {
+    let tmp = tempdir().expect("create tempdir");
+    let nested = tmp.path().join("nested").join("deeper");
+    fs::create_dir_all(&nested).expect("create nested dirs");
+
+    let root_file = tmp.path().join("root.txt");
+    let nested_file = nested.join("child.txt");
+    write_text_file(&root_file, "root");
+    write_text_file(&nested_file, "child");
+
+    let mut scanner = DirectoryScannerSource::new(tmp.path()).expect("create scanner");
+
+    let first = scanner.poll();
+    assert_eq!(first.len(), 2);
+    assert!(
+        first
+            .iter()
+            .any(|event| event.fingerprint.canonical_path.ends_with("root.txt"))
+    );
+    assert!(
+        first
+            .iter()
+            .any(|event| event.fingerprint.canonical_path.ends_with("child.txt"))
+    );
+
+    std::thread::sleep(Duration::from_secs(1));
+
+    let second = scanner.poll();
+    assert_eq!(second.len(), 0);
+}
+
+#[test]
+fn scanner_skips_directory_symlinks() {
+    let tmp = tempdir().expect("create tempdir");
+    let real_dir = tmp.path().join("real");
+    let link_dir = tmp.path().join("linked");
+    fs::create_dir(&real_dir).expect("create real dir");
+    write_text_file(&real_dir.join("inside.txt"), "nested");
+
+    if let Err(error) = create_dir_symlink(&real_dir, &link_dir) {
+        eprintln!("skipping symlink test: {error}");
+        return;
+    }
+
+    let mut scanner = DirectoryScannerSource::new(tmp.path()).expect("create scanner");
+
+    let events = scanner.poll();
+    assert_eq!(events.len(), 1);
+    assert!(events[0].fingerprint.canonical_path.ends_with("inside.txt"));
+    assert!(
+        !events[0]
+            .fingerprint
+            .canonical_path
+            .contains(link_dir.to_string_lossy().as_ref())
+    );
+}
+
+fn write_text_file(path: &Path, contents: &str) {
+    let mut file = fs::File::create(path).expect("create file");
+    write!(file, "{contents}").expect("write file");
+}
+
+#[cfg(unix)]
+fn create_dir_symlink(original: &Path, link: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(original, link)
+}
+
+#[cfg(windows)]
+fn create_dir_symlink(original: &Path, link: &Path) -> std::io::Result<()> {
+    std::os::windows::fs::symlink_dir(original, link)
 }
