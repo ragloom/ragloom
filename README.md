@@ -30,7 +30,7 @@ It is useful for local-folder to Qdrant ingestion experiments and small automati
 Supported today:
 
 - local filesystem source
-- top-level files in one configured directory
+- recursive scanning of regular files under one configured directory
 - UTF-8 text, Markdown, and source code files
 - recursive, Markdown-aware, and code-aware chunking
 - experimental semantic chunking
@@ -42,7 +42,6 @@ Supported today:
 Not supported yet:
 
 - PDF or DOCX parsing
-- recursive directory scanning
 - persistent WAL
 - automatic Qdrant collection creation
 - production retry or dead-letter queues
@@ -165,6 +164,16 @@ ragloom --config ./ragloom.yaml --embed-backend http --embed-model default
 - chunker settings are currently configured by CLI flags, not by YAML
 - flags support both `--flag value` and `--flag=value`
 - the config file is merged with CLI flags; CLI flags take precedence
+
+### Source scanning behavior
+
+The built-in filesystem source walks the configured root recursively and ingests
+regular files it can stat.
+
+- traversal is deterministic because directory entries are processed in sorted path order
+- hidden files and hidden directories are treated like any other path
+- symbolic links are not followed
+- unreadable directories or files that cannot be stat'ed are skipped
 
 ## How is Ragloom different?
 
@@ -325,7 +334,6 @@ Ragloom does not log secrets, API keys, or full document contents.
 - example environment for local Qdrant setup
 - clearer ingestion summary at runtime
 - automatic Qdrant collection creation
-- recursive directory scanning
 - release binaries
 
 ### v0.2 - More reliable daemon behavior
@@ -380,8 +388,8 @@ Adjust the vector size to match your embedding model.
 
 Check that your files are:
 - UTF-8 encoded
-- located in the top-level of the configured directory
-- not in subdirectories (recursive scanning is not yet supported)
+- located somewhere under the configured directory
+- regular files rather than symbolic links
 
 ### OpenAI API errors
 
@@ -403,7 +411,6 @@ curl https://api.openai.com/v1/embeddings \
 ## Current limitations
 
 - only local filesystem input
-- only top-level files in the configured directory
 - only Qdrant as a built-in sink
 - only UTF-8 file loading
 - no persistent WAL yet

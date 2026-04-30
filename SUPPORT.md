@@ -62,6 +62,7 @@ When opening an issue, please include:
 - Ragloom version (`ragloom --version` or check `Cargo.toml`)
 - Rust version (`rustc --version`)
 - Operating system and architecture
+- whether the missing files are nested under subdirectories or behind symbolic links
 - Qdrant version (if applicable)
 - Embedding backend and model used
 - Steps to reproduce the issue
