@@ -43,7 +43,6 @@ Not supported yet:
 
 - PDF or DOCX parsing
 - persistent WAL
-- automatic Qdrant collection creation
 - production retry or dead-letter queues
 - built-in collection lifecycle management
 
@@ -57,36 +56,47 @@ This example runs Ragloom from source against a local Qdrant instance and the de
 docker run -d --name ragloom-qdrant -p 6333:6333 qdrant/qdrant
 ```
 
-### 2. Create a collection
-
-Ragloom does not create collections automatically. The example below assumes the default OpenAI model, `text-embedding-3-small`, which uses 1536-dimensional vectors.
-
-```bash
-curl -X PUT http://localhost:6333/collections/docs \
-  -H "Content-Type: application/json" \
-  -d '{"vectors":{"size":1536,"distance":"Cosine"}}'
-```
-
-If you use a different embedding model, create the collection with that model's vector size instead.
-
-### 3. Prepare example documents
+### 2. Prepare example documents
 
 ```bash
 mkdir -p docs
 printf "Ragloom watches files and indexes chunks into Qdrant.\n" > docs/intro.md
 ```
 
-### 4. Run Ragloom
+### 3. Run Ragloom
 
 ```bash
 cargo run --release -- \
   --dir ./docs \
   --qdrant-url http://localhost:6333 \
   --collection docs \
+  --create-collection-if-missing \
   --openai-api-key "$OPENAI_API_KEY"
 ```
 
-### 5. Expected result
+With the default OpenAI model, `text-embedding-3-small`, Ragloom can infer the Qdrant vector size automatically during bootstrap.
+
+Pass `--collection-vector-size <n>` when Ragloom cannot infer the size for your embedding backend or model:
+
+- required for `--embed-backend http`
+- required for unknown or custom OpenAI embedding models
+- optional if you want to override the inferred size explicitly
+
+Example with an explicit size:
+
+```bash
+cargo run --release -- \
+  --dir ./docs \
+  --qdrant-url http://localhost:6333 \
+  --collection docs \
+  --create-collection-if-missing \
+  --collection-vector-size 1536 \
+  --openai-api-key "$OPENAI_API_KEY"
+```
+
+Ragloom only bootstraps the target collection when it is missing. It does not manage broader collection lifecycle tasks such as reconfiguration, deletion, migrations, or index tuning.
+
+### 4. Expected result
 
 Success looks like this:
 
@@ -333,7 +343,6 @@ Ragloom does not log secrets, API keys, or full document contents.
 
 - example environment for local Qdrant setup
 - clearer ingestion summary at runtime
-- automatic Qdrant collection creation
 - release binaries
 
 ### v0.2 - More reliable daemon behavior
@@ -374,7 +383,34 @@ docker ps | grep qdrant
 
 ### Collection not found error
 
-Ragloom does not create collections automatically. Create the collection before running:
+If you started Ragloom with `--create-collection-if-missing`, it will bootstrap the target collection on first run.
+
+For the default OpenAI model, this is enough:
+
+```bash
+cargo run --release -- \
+  --dir ./docs \
+  --qdrant-url http://localhost:6333 \
+  --collection docs \
+  --create-collection-if-missing \
+  --openai-api-key "$OPENAI_API_KEY"
+```
+
+If you are using `--embed-backend http` or an OpenAI model Ragloom does not recognize yet, rerun with an explicit vector size:
+
+```bash
+cargo run --release -- \
+  --dir ./docs \
+  --qdrant-url http://localhost:6333 \
+  --collection docs \
+  --create-collection-if-missing \
+  --collection-vector-size 1536 \
+  --embed-backend http \
+  --embed-url http://localhost:8080/embed \
+  --embed-model default
+```
+
+If you prefer to manage Qdrant yourself, pre-create the collection before running:
 
 ```bash
 curl -X PUT http://localhost:6333/collections/docs \
@@ -382,7 +418,7 @@ curl -X PUT http://localhost:6333/collections/docs \
   -d '{"vectors":{"size":1536,"distance":"Cosine"}}'
 ```
 
-Adjust the vector size to match your embedding model.
+Adjust the vector size to match your embedding model. Ragloom does not perform general collection lifecycle management beyond optional first-run bootstrap of the configured collection.
 
 ### Empty or missing chunks
 
@@ -414,7 +450,7 @@ curl https://api.openai.com/v1/embeddings \
 - only Qdrant as a built-in sink
 - only UTF-8 file loading
 - no persistent WAL yet
-- no automatic collection management yet
+- no general collection lifecycle management beyond optional first-run bootstrap
 - no production retry queue yet
 
 ## Contributing

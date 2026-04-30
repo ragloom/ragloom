@@ -28,6 +28,8 @@ pub struct RunConfig {
     pub embed_backend: EmbedBackend,
     pub qdrant_url: String,
     pub collection: String,
+    pub create_collection_if_missing: bool,
+    pub collection_vector_size: Option<usize>,
     pub chunker_strategy: String,
     pub size_metric: String,
     pub size_max: usize,
@@ -78,6 +80,8 @@ pub fn parse_args(args: &[String]) -> Result<RunConfig, RagloomError> {
 
     let mut qdrant_url: Option<String> = None;
     let mut collection: Option<String> = None;
+    let mut create_collection_if_missing = false;
+    let mut collection_vector_size: Option<String> = None;
 
     let mut chunker_strategy: Option<String> = None;
     let mut size_metric: Option<String> = None;
@@ -119,6 +123,19 @@ pub fn parse_args(args: &[String]) -> Result<RunConfig, RagloomError> {
 
             "--qdrant-url" => qdrant_url = next_value(),
             "--collection" => collection = next_value(),
+            "--create-collection-if-missing" => {
+                if inline_value.is_some() {
+                    return Err(RagloomError::from_kind(RagloomErrorKind::InvalidInput)
+                        .with_context("--create-collection-if-missing does not accept a value"));
+                }
+                create_collection_if_missing = true;
+            }
+            "--collection-vector-size" => {
+                collection_vector_size = Some(next_value().ok_or_else(|| {
+                    RagloomError::from_kind(RagloomErrorKind::InvalidInput)
+                        .with_context("missing required value: --collection-vector-size")
+                })?);
+            }
 
             "--chunker-strategy" => chunker_strategy = next_value(),
             "--size-metric" => size_metric = next_value(),
@@ -169,6 +186,18 @@ pub fn parse_args(args: &[String]) -> Result<RunConfig, RagloomError> {
             RagloomError::from_kind(RagloomErrorKind::Config)
                 .with_context("missing required value: --collection or sink.collection in --config")
         })?;
+    let collection_vector_size = collection_vector_size
+        .map(|s| {
+            s.parse::<usize>().map_err(|e| {
+                RagloomError::from_kind(RagloomErrorKind::InvalidInput)
+                    .with_context(format!("--collection-vector-size must be integer: {e}"))
+            })
+        })
+        .transpose()?;
+    if collection_vector_size == Some(0) {
+        return Err(RagloomError::from_kind(RagloomErrorKind::InvalidInput)
+            .with_context("--collection-vector-size must be positive"));
+    }
 
     let backend = embed_backend.unwrap_or_else(|| "openai".to_string());
 
@@ -352,6 +381,8 @@ pub fn parse_args(args: &[String]) -> Result<RunConfig, RagloomError> {
         embed_backend,
         qdrant_url,
         collection,
+        create_collection_if_missing,
+        collection_vector_size,
         chunker_strategy,
         size_metric,
         size_max,
@@ -407,52 +438,57 @@ fn embedding_fingerprint(cfg: &RunConfig) -> String {
     }
 }
 
-#[tokio::main]
-async fn main() {
-    if let Err(err) = try_main().await {
-        tracing::error!(
-            error.message = %err,
-            error.kind = %err.kind,
-            "ragloom.fatal"
-        );
-        std::process::exit(1);
+fn resolve_collection_vector_size(cfg: &RunConfig) -> Result<usize, RagloomError> {
+    if let Some(size) = cfg.collection_vector_size {
+        return Ok(size);
+    }
+
+    match &cfg.embed_backend {
+        EmbedBackend::OpenAi { model, .. } => match model.as_str() {
+            "text-embedding-3-small" => Ok(1536),
+            "text-embedding-3-large" => Ok(3072),
+            "text-embedding-ada-002" => Ok(1536),
+            other => Err(RagloomError::from_kind(RagloomErrorKind::Config).with_context(
+                format!(
+                    "unknown OpenAI model for collection vector size: {other}; pass --collection-vector-size"
+                ),
+            )),
+        },
+        EmbedBackend::Http { .. } => Err(RagloomError::from_kind(RagloomErrorKind::Config)
+            .with_context("http backend requires --collection-vector-size")),
     }
 }
 
-async fn try_main() -> Result<(), RagloomError> {
-    let obs_cfg = ragloom::observability::load_from_process_env()?;
-    let dispatch = ragloom::observability::init_subscriber(&obs_cfg)?;
-    tracing::dispatcher::set_global_default(dispatch).map_err(|e| {
-        RagloomError::new(RagloomErrorKind::Internal, e)
-            .with_context("failed to install tracing subscriber")
+async fn bootstrap_collection_if_needed(
+    cfg: &RunConfig,
+    sink: &QdrantSink,
+) -> Result<(), RagloomError> {
+    if !cfg.create_collection_if_missing {
+        return Ok(());
+    }
+
+    let vector_size = resolve_collection_vector_size(cfg).map_err(|e| {
+        RagloomError::new(e.kind, e).with_context("failed to bootstrap Qdrant collection")
     })?;
+    sink.ensure_collection_exists(vector_size)
+        .await
+        .map_err(|e| {
+            RagloomError::new(e.kind, e).with_context("failed to bootstrap Qdrant collection")
+        })
+}
 
-    tracing::info!(
-        event.name = "ragloom.log_config",
-        log_format = ?obs_cfg.format,
-        log_filter = %obs_cfg.filter_directives,
-        "ragloom.log_config"
-    );
+struct PreparedStartup {
+    embedding: std::sync::Arc<dyn ragloom::embed::EmbeddingProvider + Send + Sync>,
+    sink: QdrantSink,
+    source: DirectoryScannerSource,
+    chunker: std::sync::Arc<dyn ragloom::transform::chunker::Chunker>,
+}
 
-    let args: Vec<String> = std::env::args().collect();
-    let cfg = parse_args(&args)?;
-
-    let source = DirectoryScannerSource::new(&cfg.dir).map_err(|e| {
-        RagloomError::new(RagloomErrorKind::Io, e)
-            .with_context("failed to create directory scanner source")
-    })?;
-
-    let wal = std::sync::Arc::new(tokio::sync::Mutex::new(
-        ragloom::state::wal::InMemoryWal::new(),
-    ));
-
-    let runtime = Runtime::with_shared_wal(source, std::sync::Arc::clone(&wal));
-    let (queue, shutdown) = AsyncRuntime::new(runtime, 128).start();
-
-    let embed_fingerprint = embedding_fingerprint(&cfg);
+async fn prepare_startup(cfg: &RunConfig) -> Result<PreparedStartup, RagloomError> {
+    let embed_fingerprint = embedding_fingerprint(cfg);
 
     let embedding: std::sync::Arc<dyn ragloom::embed::EmbeddingProvider + Send + Sync> =
-        match cfg.embed_backend {
+        match &cfg.embed_backend {
             EmbedBackend::OpenAi {
                 endpoint,
                 api_key,
@@ -460,9 +496,9 @@ async fn try_main() -> Result<(), RagloomError> {
             } => {
                 let client = ragloom::embed::openai_client::OpenAiEmbeddingClient::new(
                     ragloom::embed::openai_client::OpenAiEmbeddingConfig {
-                        endpoint,
-                        api_key,
-                        model,
+                        endpoint: endpoint.clone(),
+                        api_key: api_key.clone(),
+                        model: model.clone(),
                         timeout: Duration::from_secs(30),
                     },
                 )
@@ -471,8 +507,8 @@ async fn try_main() -> Result<(), RagloomError> {
             }
             EmbedBackend::Http { url, model } => {
                 let client = HttpEmbeddingClient::new(HttpEmbeddingConfig {
-                    endpoint: url,
-                    model,
+                    endpoint: url.clone(),
+                    model: model.clone(),
                     timeout: Duration::from_secs(30),
                 })
                 .map_err(|e| e.with_context("failed to build HTTP embedding client"))?;
@@ -481,17 +517,11 @@ async fn try_main() -> Result<(), RagloomError> {
         };
 
     let sink = QdrantSink::new(QdrantConfig {
-        base_url: cfg.qdrant_url,
-        collection: cfg.collection,
+        base_url: cfg.qdrant_url.clone(),
+        collection: cfg.collection.clone(),
         timeout: Duration::from_secs(30),
     })
     .map_err(|e| e.with_context("failed to build Qdrant sink"))?;
-
-    let metric = match cfg.size_metric.as_str() {
-        "chars" => ragloom::transform::chunker::size::SizeMetric::Chars,
-        "tokens" => ragloom::transform::chunker::size::SizeMetric::Tokens,
-        _ => unreachable!("validated in parse_args"),
-    };
 
     if cfg.tokenizer != "tiktoken-cl100k" {
         return Err(
@@ -506,6 +536,12 @@ async fn try_main() -> Result<(), RagloomError> {
         tokenizer = %cfg.tokenizer,
         "ragloom.chunker.tokenizer_selected"
     );
+
+    let metric = match cfg.size_metric.as_str() {
+        "chars" => ragloom::transform::chunker::size::SizeMetric::Chars,
+        "tokens" => ragloom::transform::chunker::size::SizeMetric::Tokens,
+        _ => unreachable!("validated in parse_args"),
+    };
 
     let rec_cfg = ragloom::transform::chunker::recursive::RecursiveConfig {
         metric,
@@ -613,6 +649,65 @@ async fn try_main() -> Result<(), RagloomError> {
         }
     };
 
+    let source = DirectoryScannerSource::new(&cfg.dir).map_err(|e| {
+        RagloomError::new(RagloomErrorKind::Io, e)
+            .with_context("failed to create directory scanner source")
+    })?;
+
+    bootstrap_collection_if_needed(cfg, &sink).await?;
+
+    Ok(PreparedStartup {
+        embedding,
+        sink,
+        source,
+        chunker,
+    })
+}
+
+#[tokio::main]
+async fn main() {
+    if let Err(err) = try_main().await {
+        tracing::error!(
+            error.message = %err,
+            error.kind = %err.kind,
+            "ragloom.fatal"
+        );
+        std::process::exit(1);
+    }
+}
+
+async fn try_main() -> Result<(), RagloomError> {
+    let obs_cfg = ragloom::observability::load_from_process_env()?;
+    let dispatch = ragloom::observability::init_subscriber(&obs_cfg)?;
+    tracing::dispatcher::set_global_default(dispatch).map_err(|e| {
+        RagloomError::new(RagloomErrorKind::Internal, e)
+            .with_context("failed to install tracing subscriber")
+    })?;
+
+    tracing::info!(
+        event.name = "ragloom.log_config",
+        log_format = ?obs_cfg.format,
+        log_filter = %obs_cfg.filter_directives,
+        "ragloom.log_config"
+    );
+
+    let args: Vec<String> = std::env::args().collect();
+    let cfg = parse_args(&args)?;
+
+    let PreparedStartup {
+        embedding,
+        sink,
+        source,
+        chunker,
+    } = prepare_startup(&cfg).await?;
+
+    let wal = std::sync::Arc::new(tokio::sync::Mutex::new(
+        ragloom::state::wal::InMemoryWal::new(),
+    ));
+
+    let runtime = Runtime::with_shared_wal(source, std::sync::Arc::clone(&wal));
+    let (queue, shutdown) = AsyncRuntime::new(runtime, 128).start();
+
     let pipeline = PipelineExecutor::with_chunker(
         embedding,
         std::sync::Arc::new(sink),
@@ -643,8 +738,146 @@ async fn try_main() -> Result<(), RagloomError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
     use std::io::Write;
+    use std::net::TcpListener;
+    use std::sync::mpsc;
+    use std::sync::mpsc::Sender;
+    use std::sync::{Arc, Mutex};
     use tempfile::NamedTempFile;
+
+    #[derive(Debug, Clone)]
+    struct TestResponse {
+        status: u16,
+        reason: &'static str,
+        body: &'static str,
+    }
+
+    struct RequestCounterServer {
+        stop: Sender<()>,
+        handle: std::thread::JoinHandle<usize>,
+    }
+
+    fn spawn_qdrant_bootstrap_server(
+        responses: Vec<TestResponse>,
+    ) -> (String, std::thread::JoinHandle<Vec<String>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let responses = Arc::new(Mutex::new(VecDeque::from(responses)));
+
+        let handle = std::thread::spawn(move || {
+            let mut requests = Vec::new();
+
+            loop {
+                let response = {
+                    let mut guard = responses.lock().expect("lock");
+                    guard.pop_front()
+                };
+
+                let Some(response) = response else {
+                    break;
+                };
+
+                let (mut stream, _) = listener.accept().expect("accept");
+                let mut buf = [0_u8; 8192];
+                let mut request = Vec::new();
+
+                loop {
+                    let read = std::io::Read::read(&mut stream, &mut buf).expect("read");
+                    if read == 0 {
+                        break;
+                    }
+                    request.extend_from_slice(&buf[..read]);
+                    if request.windows(4).any(|w| w == b"\r\n\r\n") {
+                        let header_end = request
+                            .windows(4)
+                            .position(|w| w == b"\r\n\r\n")
+                            .expect("header end")
+                            + 4;
+                        let headers = String::from_utf8_lossy(&request[..header_end]);
+                        let content_length = headers
+                            .lines()
+                            .find_map(|line| {
+                                let (name, value) = line.split_once(':')?;
+                                if name.eq_ignore_ascii_case("content-length") {
+                                    value.trim().parse::<usize>().ok()
+                                } else {
+                                    None
+                                }
+                            })
+                            .unwrap_or(0);
+                        while request.len() < header_end + content_length {
+                            let read =
+                                std::io::Read::read(&mut stream, &mut buf).expect("read body");
+                            if read == 0 {
+                                break;
+                            }
+                            request.extend_from_slice(&buf[..read]);
+                        }
+                        break;
+                    }
+                }
+
+                requests.push(String::from_utf8_lossy(&request).into_owned());
+                write!(
+                    stream,
+                    "HTTP/1.1 {} {}\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{}",
+                    response.status,
+                    response.reason,
+                    response.body.len(),
+                    response.body
+                )
+                .expect("write response");
+            }
+
+            requests
+        });
+
+        (format!("http://{}", addr), handle)
+    }
+
+    fn spawn_qdrant_request_counter_server() -> (String, RequestCounterServer) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let addr = listener.local_addr().expect("addr");
+        let (stop_tx, stop_rx) = mpsc::channel();
+
+        let handle = std::thread::spawn(move || {
+            let mut requests = 0;
+
+            loop {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let mut buf = [0_u8; 8192];
+                        let _ = std::io::Read::read(&mut stream, &mut buf);
+                        requests += 1;
+                        write!(
+                            stream,
+                            "HTTP/1.1 200 OK\r\nContent-Length: 15\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{{\"status\":\"ok\"}}"
+                        )
+                        .expect("write response");
+                    }
+                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                        if stop_rx.try_recv().is_ok() {
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(err) => panic!("accept failed: {err}"),
+                }
+            }
+
+            requests
+        });
+
+        (
+            format!("http://{}", addr),
+            RequestCounterServer {
+                stop: stop_tx,
+                handle,
+            },
+        )
+    }
 
     #[test]
     fn parse_args_returns_error_when_required_flags_missing() {
@@ -703,6 +936,8 @@ mod tests {
                 },
                 qdrant_url: "http://qdrant".to_string(),
                 collection: "docs".to_string(),
+                create_collection_if_missing: false,
+                collection_vector_size: None,
                 chunker_strategy: "recursive".to_string(),
                 size_metric: "chars".to_string(),
                 size_max: 2000,
@@ -715,6 +950,460 @@ mod tests {
                 semantic_provider: "adapter".to_string(),
                 semantic_percentile: 95,
             }
+        );
+    }
+
+    #[test]
+    fn parse_args_defaults_bootstrap_flags_to_disabled_and_none() {
+        let args = vec![
+            "ragloom".to_string(),
+            "--dir".to_string(),
+            "/tmp/docs".to_string(),
+            "--embed-backend".to_string(),
+            "http".to_string(),
+            "--embed-url".to_string(),
+            "http://embed".to_string(),
+            "--embed-model".to_string(),
+            "default".to_string(),
+            "--qdrant-url".to_string(),
+            "http://qdrant".to_string(),
+            "--collection".to_string(),
+            "docs".to_string(),
+        ];
+
+        let cfg = parse_args(&args).expect("config");
+        assert!(!cfg.create_collection_if_missing);
+        assert_eq!(cfg.collection_vector_size, None);
+    }
+
+    #[test]
+    fn parse_args_accepts_collection_bootstrap_flags() {
+        let args = vec![
+            "ragloom".to_string(),
+            "--dir".to_string(),
+            "/tmp/docs".to_string(),
+            "--embed-backend".to_string(),
+            "http".to_string(),
+            "--embed-url".to_string(),
+            "http://embed".to_string(),
+            "--embed-model".to_string(),
+            "default".to_string(),
+            "--qdrant-url".to_string(),
+            "http://qdrant".to_string(),
+            "--collection".to_string(),
+            "docs".to_string(),
+            "--create-collection-if-missing".to_string(),
+            "--collection-vector-size".to_string(),
+            "768".to_string(),
+        ];
+
+        let cfg = parse_args(&args).expect("config");
+        assert!(cfg.create_collection_if_missing);
+        assert_eq!(cfg.collection_vector_size, Some(768));
+    }
+
+    #[test]
+    fn parse_args_rejects_inline_value_for_create_collection_if_missing() {
+        let args = vec![
+            "ragloom".to_string(),
+            "--dir".to_string(),
+            "/tmp/docs".to_string(),
+            "--embed-backend".to_string(),
+            "http".to_string(),
+            "--embed-url".to_string(),
+            "http://embed".to_string(),
+            "--embed-model".to_string(),
+            "default".to_string(),
+            "--qdrant-url".to_string(),
+            "http://qdrant".to_string(),
+            "--collection".to_string(),
+            "docs".to_string(),
+            "--create-collection-if-missing=false".to_string(),
+        ];
+
+        let err = parse_args(&args).expect_err("expected invalid boolean flag usage");
+        assert_eq!(err.kind, RagloomErrorKind::InvalidInput);
+        assert!(
+            err.to_string()
+                .contains("--create-collection-if-missing does not accept a value")
+        );
+    }
+
+    #[test]
+    fn parse_args_accepts_collection_vector_size_inline_value() {
+        let args = vec![
+            "ragloom".to_string(),
+            "--dir".to_string(),
+            "/tmp/docs".to_string(),
+            "--embed-backend".to_string(),
+            "http".to_string(),
+            "--embed-url".to_string(),
+            "http://embed".to_string(),
+            "--embed-model".to_string(),
+            "default".to_string(),
+            "--qdrant-url".to_string(),
+            "http://qdrant".to_string(),
+            "--collection".to_string(),
+            "docs".to_string(),
+            "--collection-vector-size=768".to_string(),
+        ];
+
+        let cfg = parse_args(&args).expect("config");
+        assert_eq!(cfg.collection_vector_size, Some(768));
+    }
+
+    #[test]
+    fn parse_args_rejects_missing_collection_vector_size_value() {
+        let args = vec![
+            "ragloom".to_string(),
+            "--dir".to_string(),
+            "/tmp/docs".to_string(),
+            "--embed-backend".to_string(),
+            "http".to_string(),
+            "--embed-url".to_string(),
+            "http://embed".to_string(),
+            "--embed-model".to_string(),
+            "default".to_string(),
+            "--qdrant-url".to_string(),
+            "http://qdrant".to_string(),
+            "--collection".to_string(),
+            "docs".to_string(),
+            "--collection-vector-size".to_string(),
+        ];
+
+        let err = parse_args(&args).expect_err("expected missing vector size value");
+        assert_eq!(err.kind, RagloomErrorKind::InvalidInput);
+        assert!(
+            err.to_string()
+                .contains("missing required value: --collection-vector-size")
+        );
+    }
+
+    #[test]
+    fn parse_args_rejects_invalid_collection_vector_size() {
+        let args = vec![
+            "ragloom".to_string(),
+            "--dir".to_string(),
+            "/tmp/docs".to_string(),
+            "--embed-backend".to_string(),
+            "http".to_string(),
+            "--embed-url".to_string(),
+            "http://embed".to_string(),
+            "--embed-model".to_string(),
+            "default".to_string(),
+            "--qdrant-url".to_string(),
+            "http://qdrant".to_string(),
+            "--collection".to_string(),
+            "docs".to_string(),
+            "--collection-vector-size".to_string(),
+            "0".to_string(),
+        ];
+
+        let err = parse_args(&args).expect_err("expected invalid vector size");
+        assert_eq!(err.kind, RagloomErrorKind::InvalidInput);
+        assert!(
+            err.to_string()
+                .contains("--collection-vector-size must be positive")
+        );
+    }
+
+    #[test]
+    fn resolve_collection_vector_size_prefers_explicit_override() {
+        let cfg = RunConfig {
+            dir: "/tmp/docs".to_string(),
+            embed_backend: EmbedBackend::OpenAi {
+                endpoint: "https://api.openai.com/v1/embeddings".to_string(),
+                api_key: "test-key".to_string(),
+                model: "text-embedding-3-small".to_string(),
+            },
+            qdrant_url: "http://qdrant".to_string(),
+            collection: "docs".to_string(),
+            create_collection_if_missing: true,
+            collection_vector_size: Some(768),
+            chunker_strategy: "recursive".to_string(),
+            size_metric: "chars".to_string(),
+            size_max: 2000,
+            size_min: 0,
+            size_overlap: 0,
+            tokenizer: "tiktoken-cl100k".to_string(),
+            chunker_mode: "router".to_string(),
+            chunker_single: None,
+            enable_semantic: false,
+            semantic_provider: "adapter".to_string(),
+            semantic_percentile: 95,
+        };
+
+        let size = resolve_collection_vector_size(&cfg).expect("vector size");
+        assert_eq!(size, 768);
+    }
+
+    #[test]
+    fn resolve_collection_vector_size_infers_known_openai_model_size() {
+        let cfg = RunConfig {
+            dir: "/tmp/docs".to_string(),
+            embed_backend: EmbedBackend::OpenAi {
+                endpoint: "https://api.openai.com/v1/embeddings".to_string(),
+                api_key: "test-key".to_string(),
+                model: "text-embedding-3-small".to_string(),
+            },
+            qdrant_url: "http://qdrant".to_string(),
+            collection: "docs".to_string(),
+            create_collection_if_missing: true,
+            collection_vector_size: None,
+            chunker_strategy: "recursive".to_string(),
+            size_metric: "chars".to_string(),
+            size_max: 2000,
+            size_min: 0,
+            size_overlap: 0,
+            tokenizer: "tiktoken-cl100k".to_string(),
+            chunker_mode: "router".to_string(),
+            chunker_single: None,
+            enable_semantic: false,
+            semantic_provider: "adapter".to_string(),
+            semantic_percentile: 95,
+        };
+
+        let size = resolve_collection_vector_size(&cfg).expect("vector size");
+        assert_eq!(size, 1536);
+    }
+
+    #[test]
+    fn resolve_collection_vector_size_rejects_http_backend_without_override() {
+        let cfg = RunConfig {
+            dir: "/tmp/docs".to_string(),
+            embed_backend: EmbedBackend::Http {
+                url: "http://embed".to_string(),
+                model: "default".to_string(),
+            },
+            qdrant_url: "http://qdrant".to_string(),
+            collection: "docs".to_string(),
+            create_collection_if_missing: true,
+            collection_vector_size: None,
+            chunker_strategy: "recursive".to_string(),
+            size_metric: "chars".to_string(),
+            size_max: 2000,
+            size_min: 0,
+            size_overlap: 0,
+            tokenizer: "tiktoken-cl100k".to_string(),
+            chunker_mode: "router".to_string(),
+            chunker_single: None,
+            enable_semantic: false,
+            semantic_provider: "adapter".to_string(),
+            semantic_percentile: 95,
+        };
+
+        let err = resolve_collection_vector_size(&cfg).expect_err("expected config error");
+        assert_eq!(err.kind, RagloomErrorKind::Config);
+        assert!(
+            err.to_string()
+                .contains("requires --collection-vector-size")
+        );
+    }
+
+    #[cfg_attr(miri, ignore = "Miri does not support TCP socket tests")]
+    #[tokio::test]
+    async fn prepare_startup_skips_bootstrap_when_embedding_client_construction_fails() {
+        let (base_url, server) = spawn_qdrant_request_counter_server();
+        let cfg = RunConfig {
+            dir: ".".to_string(),
+            embed_backend: EmbedBackend::OpenAi {
+                endpoint: "https://api.openai.com/v1/embeddings".to_string(),
+                api_key: "bad\nkey".to_string(),
+                model: "text-embedding-3-small".to_string(),
+            },
+            qdrant_url: base_url,
+            collection: "docs".to_string(),
+            create_collection_if_missing: true,
+            collection_vector_size: None,
+            chunker_strategy: "recursive".to_string(),
+            size_metric: "chars".to_string(),
+            size_max: 2000,
+            size_min: 0,
+            size_overlap: 0,
+            tokenizer: "tiktoken-cl100k".to_string(),
+            chunker_mode: "router".to_string(),
+            chunker_single: None,
+            enable_semantic: false,
+            semantic_provider: "adapter".to_string(),
+            semantic_percentile: 95,
+        };
+
+        let err = match prepare_startup(&cfg).await {
+            Ok(_) => panic!("expected embedding client construction error"),
+            Err(err) => err,
+        };
+        server.stop.send(()).expect("stop");
+        let request_count = server.handle.join().expect("join");
+
+        assert_eq!(err.kind, RagloomErrorKind::InvalidInput);
+        assert!(
+            err.to_string()
+                .contains("failed to build OpenAI embedding client")
+        );
+        assert_eq!(request_count, 0);
+    }
+
+    #[cfg_attr(miri, ignore = "Miri does not support TCP socket tests")]
+    #[tokio::test]
+    async fn bootstrap_collection_if_needed_infers_known_openai_model_size_in_startup_path() {
+        let (base_url, server) = spawn_qdrant_bootstrap_server(vec![
+            TestResponse {
+                status: 404,
+                reason: "Not Found",
+                body: r#"{"status":"not_found"}"#,
+            },
+            TestResponse {
+                status: 200,
+                reason: "OK",
+                body: r#"{"status":"ok"}"#,
+            },
+        ]);
+
+        let cfg = RunConfig {
+            dir: "/tmp/docs".to_string(),
+            embed_backend: EmbedBackend::OpenAi {
+                endpoint: "https://api.openai.com/v1/embeddings".to_string(),
+                api_key: "test-key".to_string(),
+                model: "text-embedding-3-small".to_string(),
+            },
+            qdrant_url: base_url.clone(),
+            collection: "docs".to_string(),
+            create_collection_if_missing: true,
+            collection_vector_size: None,
+            chunker_strategy: "recursive".to_string(),
+            size_metric: "chars".to_string(),
+            size_max: 2000,
+            size_min: 0,
+            size_overlap: 0,
+            tokenizer: "tiktoken-cl100k".to_string(),
+            chunker_mode: "router".to_string(),
+            chunker_single: None,
+            enable_semantic: false,
+            semantic_provider: "adapter".to_string(),
+            semantic_percentile: 95,
+        };
+
+        let sink = QdrantSink::new(QdrantConfig {
+            base_url,
+            collection: "docs".to_string(),
+            timeout: Duration::from_secs(5),
+        })
+        .expect("sink");
+
+        bootstrap_collection_if_needed(&cfg, &sink)
+            .await
+            .expect("bootstrap");
+
+        let requests = server.join().expect("join");
+        assert_eq!(requests.len(), 2);
+        assert!(requests[1].starts_with("PUT /collections/docs HTTP/1.1"));
+        assert!(requests[1].contains(r#""size":1536"#));
+    }
+
+    #[cfg_attr(miri, ignore = "Miri does not support TCP socket tests")]
+    #[tokio::test]
+    async fn bootstrap_collection_if_needed_uses_explicit_http_vector_size_in_startup_path() {
+        let (base_url, server) = spawn_qdrant_bootstrap_server(vec![
+            TestResponse {
+                status: 404,
+                reason: "Not Found",
+                body: r#"{"status":"not_found"}"#,
+            },
+            TestResponse {
+                status: 200,
+                reason: "OK",
+                body: r#"{"status":"ok"}"#,
+            },
+        ]);
+
+        let cfg = RunConfig {
+            dir: "/tmp/docs".to_string(),
+            embed_backend: EmbedBackend::Http {
+                url: "http://embed".to_string(),
+                model: "default".to_string(),
+            },
+            qdrant_url: base_url.clone(),
+            collection: "docs".to_string(),
+            create_collection_if_missing: true,
+            collection_vector_size: Some(768),
+            chunker_strategy: "recursive".to_string(),
+            size_metric: "chars".to_string(),
+            size_max: 2000,
+            size_min: 0,
+            size_overlap: 0,
+            tokenizer: "tiktoken-cl100k".to_string(),
+            chunker_mode: "router".to_string(),
+            chunker_single: None,
+            enable_semantic: false,
+            semantic_provider: "adapter".to_string(),
+            semantic_percentile: 95,
+        };
+
+        let sink = QdrantSink::new(QdrantConfig {
+            base_url,
+            collection: "docs".to_string(),
+            timeout: Duration::from_secs(5),
+        })
+        .expect("sink");
+
+        bootstrap_collection_if_needed(&cfg, &sink)
+            .await
+            .expect("bootstrap");
+
+        let requests = server.join().expect("join");
+        assert_eq!(requests.len(), 2);
+        assert!(requests[1].starts_with("PUT /collections/docs HTTP/1.1"));
+        assert!(requests[1].contains(r#""size":768"#));
+    }
+
+    #[cfg_attr(miri, ignore = "Miri does not support TCP socket tests")]
+    #[tokio::test]
+    async fn bootstrap_collection_if_needed_surfaces_unknown_openai_model_with_config_context() {
+        let cfg = RunConfig {
+            dir: "/tmp/docs".to_string(),
+            embed_backend: EmbedBackend::OpenAi {
+                endpoint: "https://api.openai.com/v1/embeddings".to_string(),
+                api_key: "test-key".to_string(),
+                model: "text-embedding-unknown".to_string(),
+            },
+            qdrant_url: "http://127.0.0.1:1".to_string(),
+            collection: "docs".to_string(),
+            create_collection_if_missing: true,
+            collection_vector_size: None,
+            chunker_strategy: "recursive".to_string(),
+            size_metric: "chars".to_string(),
+            size_max: 2000,
+            size_min: 0,
+            size_overlap: 0,
+            tokenizer: "tiktoken-cl100k".to_string(),
+            chunker_mode: "router".to_string(),
+            chunker_single: None,
+            enable_semantic: false,
+            semantic_provider: "adapter".to_string(),
+            semantic_percentile: 95,
+        };
+
+        let sink = QdrantSink::new(QdrantConfig {
+            base_url: cfg.qdrant_url.clone(),
+            collection: cfg.collection.clone(),
+            timeout: Duration::from_secs(5),
+        })
+        .expect("sink");
+
+        let err = bootstrap_collection_if_needed(&cfg, &sink)
+            .await
+            .expect_err("expected config error");
+
+        assert_eq!(err.kind, RagloomErrorKind::Config);
+        assert!(
+            err.to_string()
+                .contains("failed to bootstrap Qdrant collection")
+        );
+        let source = std::error::Error::source(&err).expect("source");
+        assert!(
+            source.to_string().contains(
+                "unknown OpenAI model for collection vector size: text-embedding-unknown"
+            )
         );
     }
 
