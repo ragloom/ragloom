@@ -59,7 +59,7 @@ macOS binaries are provided as convenience artifacts. They should compile and pu
 
 When opening an issue, please include:
 
-- Ragloom version (`ragloom --version` or check `Cargo.toml`)
+- Ragloom version (`ragloom --version` or `ragloom -V`; source checkouts may also check `Cargo.toml`)
 - Rust version (`rustc --version`)
 - Operating system and architecture
 - whether the missing files are nested under subdirectories or behind symbolic links

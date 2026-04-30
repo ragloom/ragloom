@@ -43,6 +43,18 @@ pub struct RunConfig {
     pub semantic_percentile: u8,
 }
 
+const USAGE: &str = "usage: ragloom [--config <path>] --dir <path> --qdrant-url <url> --collection <name> [--embed-backend <openai|http>]";
+
+/// Top-level CLI command selected by argument parsing.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum ParsedCommand {
+    // Box the run config to satisfy clippy's `large_enum_variant` lint while
+    // still modeling early-exit CLI commands explicitly.
+    Run(Box<RunConfig>),
+    Help,
+    Version,
+}
+
 /// Embedding backend selection.
 ///
 /// # Why
@@ -61,12 +73,12 @@ pub enum EmbedBackend {
     },
 }
 
-/// Parse CLI arguments into a [`RunConfig`].
+/// Parse CLI arguments into a top-level command.
 ///
 /// # Why
 /// Using `std::env::args` keeps the binary dependency-free while still allowing
 /// deterministic unit tests for argument handling.
-pub fn parse_args(args: &[String]) -> Result<RunConfig, RagloomError> {
+pub fn parse_args(args: &[String]) -> Result<ParsedCommand, RagloomError> {
     let mut config_path: Option<String> = None;
     let mut dir: Option<String> = None;
     let mut embed_backend: Option<String> = None;
@@ -125,15 +137,15 @@ pub fn parse_args(args: &[String]) -> Result<RunConfig, RagloomError> {
             "--collection" => collection = next_value(),
             "--create-collection-if-missing" => {
                 if inline_value.is_some() {
-                    return Err(RagloomError::from_kind(RagloomErrorKind::InvalidInput)
-                        .with_context("--create-collection-if-missing does not accept a value"));
+                    return Err(cli_invalid_input(
+                        "--create-collection-if-missing does not accept a value",
+                    ));
                 }
                 create_collection_if_missing = true;
             }
             "--collection-vector-size" => {
                 collection_vector_size = Some(next_value().ok_or_else(|| {
-                    RagloomError::from_kind(RagloomErrorKind::InvalidInput)
-                        .with_context("missing required value: --collection-vector-size")
+                    cli_invalid_input("missing required value: --collection-vector-size")
                 })?);
             }
 
@@ -150,15 +162,9 @@ pub fn parse_args(args: &[String]) -> Result<RunConfig, RagloomError> {
             }
             "--semantic-provider" => semantic_provider = next_value(),
             "--semantic-percentile" => semantic_percentile = next_value(),
-            "--help" | "-h" => {
-                return Err(RagloomError::from_kind(RagloomErrorKind::InvalidInput).with_context(
-                    "usage: ragloom [--config <path>] --dir <path> --qdrant-url <url> --collection <name> [--embed-backend <openai|http>]",
-                ));
-            }
-            unknown => {
-                return Err(RagloomError::from_kind(RagloomErrorKind::InvalidInput)
-                    .with_context(format!("unknown flag: {unknown}")));
-            }
+            "--help" | "-h" => return Ok(ParsedCommand::Help),
+            "--version" | "-V" => return Ok(ParsedCommand::Version),
+            unknown => return Err(cli_invalid_input(format!("unknown flag: {unknown}"))),
         }
     }
 
@@ -169,23 +175,14 @@ pub fn parse_args(args: &[String]) -> Result<RunConfig, RagloomError> {
 
     let dir = dir
         .or_else(|| file_config.as_ref().map(|c| c.source.root.clone()))
-        .ok_or_else(|| {
-            RagloomError::from_kind(RagloomErrorKind::Config)
-                .with_context("missing required value: --dir or source.root in --config")
-        })?;
+        .ok_or_else(|| cli_config_error("missing required value: --dir or source.root in --config"))?;
 
     let qdrant_url = qdrant_url
         .or_else(|| file_config.as_ref().map(|c| c.sink.qdrant_url.clone()))
-        .ok_or_else(|| {
-            RagloomError::from_kind(RagloomErrorKind::Config)
-                .with_context("missing required value: --qdrant-url or sink.qdrant_url in --config")
-        })?;
+        .ok_or_else(|| cli_config_error("missing required value: --qdrant-url or sink.qdrant_url in --config"))?;
     let collection = collection
         .or_else(|| file_config.as_ref().map(|c| c.sink.collection.clone()))
-        .ok_or_else(|| {
-            RagloomError::from_kind(RagloomErrorKind::Config)
-                .with_context("missing required value: --collection or sink.collection in --config")
-        })?;
+        .ok_or_else(|| cli_config_error("missing required value: --collection or sink.collection in --config"))?;
     let collection_vector_size = collection_vector_size
         .map(|s| {
             s.parse::<usize>().map_err(|e| {
@@ -195,8 +192,7 @@ pub fn parse_args(args: &[String]) -> Result<RunConfig, RagloomError> {
         })
         .transpose()?;
     if collection_vector_size == Some(0) {
-        return Err(RagloomError::from_kind(RagloomErrorKind::InvalidInput)
-            .with_context("--collection-vector-size must be positive"));
+        return Err(cli_invalid_input("--collection-vector-size must be positive"));
     }
 
     let backend = embed_backend.unwrap_or_else(|| "openai".to_string());
@@ -215,8 +211,7 @@ pub fn parse_args(args: &[String]) -> Result<RunConfig, RagloomError> {
                 .or_else(|| file_config.as_ref().map(|c| c.embed.endpoint.clone()))
                 .unwrap_or_else(|| "https://api.openai.com/v1/embeddings".to_string());
             let api_key = openai_api_key.ok_or_else(|| {
-                RagloomError::from_kind(RagloomErrorKind::Config)
-                    .with_context("missing required flag for openai backend: --openai-api-key")
+                cli_config_error("missing required flag for openai backend: --openai-api-key")
             })?;
             let model = openai_model.unwrap_or_else(|| "text-embedding-3-small".to_string());
             EmbedBackend::OpenAi {
@@ -229,7 +224,7 @@ pub fn parse_args(args: &[String]) -> Result<RunConfig, RagloomError> {
             let url = embed_url
                 .or_else(|| file_config.as_ref().map(|c| c.embed.endpoint.clone()))
                 .ok_or_else(|| {
-                    RagloomError::from_kind(RagloomErrorKind::Config).with_context(
+                    cli_config_error(
                         "missing required value for http backend: --embed-url or embed.endpoint in --config",
                     )
                 })?;
@@ -237,11 +232,9 @@ pub fn parse_args(args: &[String]) -> Result<RunConfig, RagloomError> {
             EmbedBackend::Http { url, model }
         }
         other => {
-            return Err(
-                RagloomError::from_kind(RagloomErrorKind::InvalidInput).with_context(format!(
-                    "invalid value for --embed-backend: {other} (expected: openai|http)"
-                )),
-            );
+            return Err(cli_invalid_input(format!(
+                "invalid value for --embed-backend: {other} (expected: openai|http)"
+            )));
         }
     };
 
@@ -249,11 +242,9 @@ pub fn parse_args(args: &[String]) -> Result<RunConfig, RagloomError> {
     match chunker_strategy.as_str() {
         "recursive" | "legacy" => {}
         other => {
-            return Err(
-                RagloomError::from_kind(RagloomErrorKind::InvalidInput).with_context(format!(
-                    "invalid --chunker-strategy: {other} (expected: recursive|legacy)"
-                )),
-            );
+            return Err(cli_invalid_input(format!(
+                "invalid --chunker-strategy: {other} (expected: recursive|legacy)"
+            )));
         }
     }
 
@@ -261,11 +252,9 @@ pub fn parse_args(args: &[String]) -> Result<RunConfig, RagloomError> {
     match size_metric.as_str() {
         "chars" | "tokens" => {}
         other => {
-            return Err(
-                RagloomError::from_kind(RagloomErrorKind::InvalidInput).with_context(format!(
-                    "invalid --size-metric: {other} (expected: chars|tokens)"
-                )),
-            );
+            return Err(cli_invalid_input(format!(
+                "invalid --size-metric: {other} (expected: chars|tokens)"
+            )));
         }
     }
 
@@ -303,11 +292,9 @@ pub fn parse_args(args: &[String]) -> Result<RunConfig, RagloomError> {
     match tokenizer.as_str() {
         "tiktoken-cl100k" => {}
         other => {
-            return Err(
-                RagloomError::from_kind(RagloomErrorKind::InvalidInput).with_context(format!(
-                    "invalid --tokenizer: {other} (expected: tiktoken-cl100k)"
-                )),
-            );
+            return Err(cli_invalid_input(format!(
+                "invalid --tokenizer: {other} (expected: tiktoken-cl100k)"
+            )));
         }
     }
 
@@ -315,16 +302,15 @@ pub fn parse_args(args: &[String]) -> Result<RunConfig, RagloomError> {
     match chunker_mode.as_str() {
         "router" | "single" => {}
         other => {
-            return Err(
-                RagloomError::from_kind(RagloomErrorKind::InvalidInput).with_context(format!(
-                    "invalid --chunker-mode: {other} (expected: router|single)"
-                )),
-            );
+            return Err(cli_invalid_input(format!(
+                "invalid --chunker-mode: {other} (expected: router|single)"
+            )));
         }
     }
     if chunker_mode == "single" && chunker_single.is_none() {
-        return Err(RagloomError::from_kind(RagloomErrorKind::Config)
-            .with_context("--chunker-mode=single requires --chunker-single"));
+        return Err(cli_config_error(
+            "--chunker-mode=single requires --chunker-single",
+        ));
     }
 
     if enable_semantic && chunker_mode == "single" && chunker_single.as_deref() != Some("semantic")
@@ -376,7 +362,7 @@ pub fn parse_args(args: &[String]) -> Result<RunConfig, RagloomError> {
         );
     }
 
-    Ok(RunConfig {
+    Ok(ParsedCommand::Run(Box::new(RunConfig {
         dir,
         embed_backend,
         qdrant_url,
@@ -394,7 +380,7 @@ pub fn parse_args(args: &[String]) -> Result<RunConfig, RagloomError> {
         enable_semantic,
         semantic_provider,
         semantic_percentile,
-    })
+    })))
 }
 
 fn load_pipeline_config(path: &str) -> Result<PipelineConfig, RagloomError> {
@@ -410,6 +396,17 @@ fn load_pipeline_config(path: &str) -> Result<PipelineConfig, RagloomError> {
         .map_err(|e| e.with_context(format!("invalid config file: {path}")))?;
 
     Ok(cfg)
+}
+
+fn cli_invalid_input(message: impl Into<String>) -> RagloomError {
+    let message = message.into();
+    RagloomError::from_kind(RagloomErrorKind::InvalidInput)
+        .with_context(format!("{message}\n{USAGE}"))
+}
+
+fn cli_config_error(message: impl Into<String>) -> RagloomError {
+    let message = message.into();
+    RagloomError::from_kind(RagloomErrorKind::Config).with_context(format!("{message}\n{USAGE}"))
 }
 
 fn parse_code_lang(s: &str) -> Result<ragloom::transform::chunker::code::Language, RagloomError> {
@@ -692,7 +689,17 @@ async fn try_main() -> Result<(), RagloomError> {
     );
 
     let args: Vec<String> = std::env::args().collect();
-    let cfg = parse_args(&args)?;
+    let cfg = match parse_args(&args)? {
+        ParsedCommand::Help => {
+            println!("{USAGE}");
+            return Ok(());
+        }
+        ParsedCommand::Version => {
+            println!("ragloom {}", env!("CARGO_PKG_VERSION"));
+            return Ok(());
+        }
+        ParsedCommand::Run(cfg) => *cfg,
+    };
 
     let PreparedStartup {
         embedding,
@@ -928,7 +935,7 @@ mod tests {
         let cfg = parse_args(&args).expect("config");
         assert_eq!(
             cfg,
-            RunConfig {
+            ParsedCommand::Run(Box::new(RunConfig {
                 dir: "/tmp/docs".to_string(),
                 embed_backend: EmbedBackend::Http {
                     url: "http://embed".to_string(),
@@ -949,8 +956,57 @@ mod tests {
                 enable_semantic: false,
                 semantic_provider: "adapter".to_string(),
                 semantic_percentile: 95,
-            }
+            }))
         );
+    }
+
+    #[test]
+    fn parse_args_returns_version_command_for_long_flag() {
+        let args = vec!["ragloom".to_string(), "--version".to_string()];
+
+        let cmd = parse_args(&args).expect("version command");
+        assert_eq!(cmd, ParsedCommand::Version);
+    }
+
+    #[test]
+    fn parse_args_returns_version_command_for_short_flag() {
+        let args = vec!["ragloom".to_string(), "-V".to_string()];
+
+        let cmd = parse_args(&args).expect("version command");
+        assert_eq!(cmd, ParsedCommand::Version);
+    }
+
+    #[test]
+    fn parse_args_returns_version_command_before_required_flag_validation() {
+        let args = vec![
+            "ragloom".to_string(),
+            "--version".to_string(),
+            "--dir".to_string(),
+            "/tmp/docs".to_string(),
+        ];
+
+        let cmd = parse_args(&args).expect("version command");
+        assert_eq!(cmd, ParsedCommand::Version);
+    }
+
+    #[test]
+    fn parse_args_returns_help_command_for_help_flag() {
+        let args = vec!["ragloom".to_string(), "--help".to_string()];
+
+        let cmd = parse_args(&args).expect("help command");
+        assert_eq!(cmd, ParsedCommand::Help);
+    }
+
+    #[test]
+    fn parse_args_supports_inline_version_flag_before_required_validation() {
+        let args = vec![
+            "ragloom".to_string(),
+            "--version".to_string(),
+            "--qdrant-url=http://qdrant".to_string(),
+        ];
+
+        let cmd = parse_args(&args).expect("version command");
+        assert_eq!(cmd, ParsedCommand::Version);
     }
 
     #[test]
@@ -972,6 +1028,9 @@ mod tests {
         ];
 
         let cfg = parse_args(&args).expect("config");
+        let ParsedCommand::Run(cfg) = cfg else {
+            panic!("expected run config");
+        };
         assert!(!cfg.create_collection_if_missing);
         assert_eq!(cfg.collection_vector_size, None);
     }
@@ -998,6 +1057,9 @@ mod tests {
         ];
 
         let cfg = parse_args(&args).expect("config");
+        let ParsedCommand::Run(cfg) = cfg else {
+            panic!("expected run config");
+        };
         assert!(cfg.create_collection_if_missing);
         assert_eq!(cfg.collection_vector_size, Some(768));
     }
@@ -1049,6 +1111,9 @@ mod tests {
         ];
 
         let cfg = parse_args(&args).expect("config");
+        let ParsedCommand::Run(cfg) = cfg else {
+            panic!("expected run config");
+        };
         assert_eq!(cfg.collection_vector_size, Some(768));
     }
 
@@ -1458,6 +1523,9 @@ sink:
         ];
 
         let cfg = parse_args(&args).expect("config");
+        let ParsedCommand::Run(cfg) = cfg else {
+            panic!("expected run config");
+        };
         assert_eq!(cfg.dir, "/tmp/from-config");
         assert_eq!(cfg.qdrant_url, "http://qdrant-from-config");
         assert_eq!(cfg.collection, "from-config");

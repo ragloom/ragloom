@@ -122,6 +122,12 @@ The compiled binary will be available at:
 target/release/ragloom
 ```
 
+Verify the built binary version with:
+
+```bash
+target/release/ragloom --version
+```
+
 ### Install into Cargo's bin directory
 
 ```bash
@@ -129,6 +135,8 @@ git clone https://github.com/ragloom/ragloom
 cd ragloom
 cargo install --path .
 ```
+
+Then confirm the installed executable with `ragloom --version` or `ragloom -V`.
 
 ## Configuration
 
