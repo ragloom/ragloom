@@ -68,12 +68,39 @@ pub struct IngestionSummary {
 }
 
 impl IngestionSummary {
+    fn lock_state(&self) -> std::sync::MutexGuard<'_, IngestionSummaryState> {
+        match self.inner.lock() {
+            Ok(state) => state,
+            Err(poisoned) => {
+                tracing::warn!(
+                    event.name = "ragloom.ingest.summary.lock_poisoned",
+                    "ragloom.ingest.summary.lock_poisoned"
+                );
+                poisoned.into_inner()
+            }
+        }
+    }
+
+    fn emit(trigger: &'static str, snapshot: IngestionSummarySnapshot) {
+        tracing::info!(
+            event.name = "ragloom.ingest.summary",
+            trigger,
+            discovered_files = snapshot.discovered_files,
+            indexed_files = snapshot.indexed_files,
+            failed_files = snapshot.failed_files,
+            emitted_points = snapshot.emitted_points,
+            pending_files = snapshot.pending_files,
+            elapsed_ms_window = snapshot.elapsed_ms,
+            "ragloom.ingest.summary"
+        );
+    }
+
     pub fn record_discovered(&self, count: usize) {
         if count == 0 {
             return;
         }
 
-        let mut state = self.inner.lock().expect("ingestion summary lock");
+        let mut state = self.lock_state();
         state.mark_activity();
         let count = count as u64;
         state.discovered_files += count;
@@ -81,7 +108,7 @@ impl IngestionSummary {
     }
 
     pub fn record_success(&self, point_count: usize) {
-        let mut state = self.inner.lock().expect("ingestion summary lock");
+        let mut state = self.lock_state();
         state.mark_activity();
         state.indexed_files += 1;
         state.emitted_points += point_count as u64;
@@ -89,7 +116,7 @@ impl IngestionSummary {
     }
 
     pub fn record_failure(&self) {
-        let mut state = self.inner.lock().expect("ingestion summary lock");
+        let mut state = self.lock_state();
         state.mark_activity();
         state.failed_files += 1;
         state.pending_files = state.pending_files.saturating_sub(1);
@@ -97,7 +124,7 @@ impl IngestionSummary {
 
     pub fn emit_if_ready(&self, trigger: &'static str) -> bool {
         let snapshot = {
-            let mut state = self.inner.lock().expect("ingestion summary lock");
+            let mut state = self.lock_state();
             if !state.dirty || state.pending_files != 0 {
                 return false;
             }
@@ -106,23 +133,13 @@ impl IngestionSummary {
             snapshot
         };
 
-        tracing::info!(
-            event.name = "ragloom.ingest.summary",
-            trigger,
-            discovered_files = snapshot.discovered_files,
-            indexed_files = snapshot.indexed_files,
-            failed_files = snapshot.failed_files,
-            emitted_points = snapshot.emitted_points,
-            pending_files = snapshot.pending_files,
-            elapsed_ms_window = snapshot.elapsed_ms,
-            "ragloom.ingest.summary"
-        );
+        Self::emit(trigger, snapshot);
         true
     }
 
     pub fn emit_if_dirty(&self, trigger: &'static str) -> bool {
         let snapshot = {
-            let mut state = self.inner.lock().expect("ingestion summary lock");
+            let mut state = self.lock_state();
             if !state.dirty {
                 return false;
             }
@@ -131,26 +148,13 @@ impl IngestionSummary {
             snapshot
         };
 
-        tracing::info!(
-            event.name = "ragloom.ingest.summary",
-            trigger,
-            discovered_files = snapshot.discovered_files,
-            indexed_files = snapshot.indexed_files,
-            failed_files = snapshot.failed_files,
-            emitted_points = snapshot.emitted_points,
-            pending_files = snapshot.pending_files,
-            elapsed_ms_window = snapshot.elapsed_ms,
-            "ragloom.ingest.summary"
-        );
+        Self::emit(trigger, snapshot);
         true
     }
 
     #[cfg(test)]
     fn snapshot(&self) -> IngestionSummarySnapshot {
-        self.inner
-            .lock()
-            .expect("ingestion summary lock")
-            .snapshot()
+        self.lock_state().snapshot()
     }
 }
 
@@ -1244,11 +1248,37 @@ mod tests {
             wal: std::sync::Arc::clone(&wal),
         };
 
+        let wal_for_worker = std::sync::Arc::clone(&wal);
         tokio::spawn(async move {
             run_worker(rx, executor).await;
         });
 
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            loop {
+                let has_ack = wal_for_worker
+                    .lock()
+                    .await
+                    .read_all()
+                    .expect("read wal")
+                    .iter()
+                    .any(|record| {
+                        matches!(
+                            record,
+                            WalRecord::SinkAckV2 {
+                                fingerprint: FileFingerprint { canonical_path, .. }
+                            } if canonical_path == "/x/a.txt"
+                        )
+                    });
+
+                if has_ack && logs_contain("ragloom.ingest.summary") {
+                    break;
+                }
+
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("expected idle-window summary after worker ack");
 
         assert!(
             logs_contain("ragloom.ingest.summary"),
