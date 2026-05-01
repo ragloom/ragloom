@@ -12,7 +12,7 @@ use ragloom::doc::FsUtf8Loader;
 use ragloom::embed::http_client::{HttpEmbeddingClient, HttpEmbeddingConfig};
 use ragloom::error::{RagloomError, RagloomErrorKind};
 use ragloom::pipeline::runtime::{
-    AckingExecutor, AsyncRuntime, PipelineExecutor, Runtime, run_worker,
+    AckingExecutor, AsyncRuntime, IngestionSummary, PipelineExecutor, Runtime, run_worker,
 };
 use ragloom::sink::qdrant::{QdrantConfig, QdrantSink};
 use ragloom::source::dir_scanner::DirectoryScannerSource;
@@ -721,14 +721,18 @@ async fn try_main() -> Result<(), RagloomError> {
     ));
 
     let runtime = Runtime::with_shared_wal(source, std::sync::Arc::clone(&wal));
-    let (queue, shutdown) = AsyncRuntime::new(runtime, 128).start();
+    let summary = IngestionSummary::default();
+    let (queue, shutdown) = AsyncRuntime::new(runtime, 128)
+        .with_summary(summary.clone())
+        .start();
 
     let pipeline = PipelineExecutor::with_chunker(
         embedding,
         std::sync::Arc::new(sink),
         std::sync::Arc::new(FsUtf8Loader),
         chunker,
-    );
+    )
+    .with_summary(summary.clone());
 
     let executor = AckingExecutor {
         inner: pipeline,
@@ -746,6 +750,7 @@ async fn try_main() -> Result<(), RagloomError> {
 
     shutdown.shutdown();
     let _ = worker.await;
+    summary.emit_if_dirty("shutdown");
 
     Ok(())
 }
