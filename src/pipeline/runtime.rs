@@ -10,6 +10,150 @@ use crate::pipeline::planner::Planner;
 use crate::source::Source;
 use crate::state::wal::{InMemoryWal, WalRecord};
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+struct IngestionSummarySnapshot {
+    discovered_files: u64,
+    indexed_files: u64,
+    failed_files: u64,
+    emitted_points: u64,
+    pending_files: u64,
+    elapsed_ms: u64,
+}
+
+#[derive(Debug, Default)]
+struct IngestionSummaryState {
+    discovered_files: u64,
+    indexed_files: u64,
+    failed_files: u64,
+    emitted_points: u64,
+    pending_files: u64,
+    dirty: bool,
+    started_at: Option<std::time::Instant>,
+}
+
+impl IngestionSummaryState {
+    fn mark_activity(&mut self) {
+        self.dirty = true;
+        self.started_at.get_or_insert_with(std::time::Instant::now);
+    }
+
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    fn snapshot(&self) -> IngestionSummarySnapshot {
+        IngestionSummarySnapshot {
+            discovered_files: self.discovered_files,
+            indexed_files: self.indexed_files,
+            failed_files: self.failed_files,
+            emitted_points: self.emitted_points,
+            pending_files: self.pending_files,
+            elapsed_ms: self
+                .started_at
+                .map(|started_at| started_at.elapsed().as_millis() as u64)
+                .unwrap_or(0),
+        }
+    }
+}
+
+/// Aggregates ingest progress into a structured, per-window summary event.
+///
+/// # Why
+/// First-run indexing can emit many per-file events. This collector keeps a
+/// minimal shared summary so operators can confirm overall progress from a
+/// single structured record without changing the runtime architecture.
+#[derive(Debug, Clone, Default)]
+pub struct IngestionSummary {
+    inner: std::sync::Arc<std::sync::Mutex<IngestionSummaryState>>,
+}
+
+impl IngestionSummary {
+    pub fn record_discovered(&self, count: usize) {
+        if count == 0 {
+            return;
+        }
+
+        let mut state = self.inner.lock().expect("ingestion summary lock");
+        state.mark_activity();
+        let count = count as u64;
+        state.discovered_files += count;
+        state.pending_files += count;
+    }
+
+    pub fn record_success(&self, point_count: usize) {
+        let mut state = self.inner.lock().expect("ingestion summary lock");
+        state.mark_activity();
+        state.indexed_files += 1;
+        state.emitted_points += point_count as u64;
+        state.pending_files = state.pending_files.saturating_sub(1);
+    }
+
+    pub fn record_failure(&self) {
+        let mut state = self.inner.lock().expect("ingestion summary lock");
+        state.mark_activity();
+        state.failed_files += 1;
+        state.pending_files = state.pending_files.saturating_sub(1);
+    }
+
+    pub fn emit_if_ready(&self, trigger: &'static str) -> bool {
+        let snapshot = {
+            let mut state = self.inner.lock().expect("ingestion summary lock");
+            if !state.dirty || state.pending_files != 0 {
+                return false;
+            }
+            let snapshot = state.snapshot();
+            state.reset();
+            snapshot
+        };
+
+        tracing::info!(
+            event.name = "ragloom.ingest.summary",
+            trigger,
+            discovered_files = snapshot.discovered_files,
+            indexed_files = snapshot.indexed_files,
+            failed_files = snapshot.failed_files,
+            emitted_points = snapshot.emitted_points,
+            pending_files = snapshot.pending_files,
+            elapsed_ms_window = snapshot.elapsed_ms,
+            "ragloom.ingest.summary"
+        );
+        true
+    }
+
+    pub fn emit_if_dirty(&self, trigger: &'static str) -> bool {
+        let snapshot = {
+            let mut state = self.inner.lock().expect("ingestion summary lock");
+            if !state.dirty {
+                return false;
+            }
+            let snapshot = state.snapshot();
+            state.reset();
+            snapshot
+        };
+
+        tracing::info!(
+            event.name = "ragloom.ingest.summary",
+            trigger,
+            discovered_files = snapshot.discovered_files,
+            indexed_files = snapshot.indexed_files,
+            failed_files = snapshot.failed_files,
+            emitted_points = snapshot.emitted_points,
+            pending_files = snapshot.pending_files,
+            elapsed_ms_window = snapshot.elapsed_ms,
+            "ragloom.ingest.summary"
+        );
+        true
+    }
+
+    #[cfg(test)]
+    fn snapshot(&self) -> IngestionSummarySnapshot {
+        self.inner
+            .lock()
+            .expect("ingestion summary lock")
+            .snapshot()
+    }
+}
+
 fn uuid_from_path_chunk_strategy(
     canonical_path: &str,
     chunk_index: usize,
@@ -214,6 +358,7 @@ pub struct PipelineExecutor {
     sink: std::sync::Arc<dyn crate::sink::Sink + Send + Sync>,
     loader: std::sync::Arc<dyn crate::doc::DocumentLoader + Send + Sync>,
     chunker: std::sync::Arc<dyn crate::transform::chunker::Chunker>,
+    summary: Option<IngestionSummary>,
 }
 
 impl Clone for PipelineExecutor {
@@ -223,6 +368,7 @@ impl Clone for PipelineExecutor {
             sink: self.sink.clone(),
             loader: self.loader.clone(),
             chunker: self.chunker.clone(),
+            summary: self.summary.clone(),
         }
     }
 }
@@ -244,6 +390,7 @@ impl PipelineExecutor {
             sink,
             loader,
             chunker,
+            summary: None,
         }
     }
 
@@ -258,7 +405,13 @@ impl PipelineExecutor {
             sink,
             loader,
             chunker,
+            summary: None,
         }
+    }
+
+    pub fn with_summary(mut self, summary: IngestionSummary) -> Self {
+        self.summary = Some(summary);
+        self
     }
 }
 
@@ -400,6 +553,9 @@ impl WorkExecutor for PipelineExecutor {
                             text
                         }
                         Err(err) => {
+                            if let Some(summary) = &self.summary {
+                                summary.record_failure();
+                            }
                             tracing::warn!(
                                 canonical_path = fingerprint.canonical_path.as_str(),
                                 error.kind = %err.kind.to_string(),
@@ -413,6 +569,9 @@ impl WorkExecutor for PipelineExecutor {
                     let points = match self.build_points_from_text(&fingerprint, &text).await {
                         Ok(points) => points,
                         Err(err) => {
+                            if let Some(summary) = &self.summary {
+                                summary.record_failure();
+                            }
                             tracing::warn!(
                                 canonical_path = fingerprint.canonical_path.as_str(),
                                 error.kind = %err.kind.to_string(),
@@ -426,6 +585,9 @@ impl WorkExecutor for PipelineExecutor {
                     let point_count = points.len();
 
                     if let Err(err) = self.sink.upsert_points(points).await {
+                        if let Some(summary) = &self.summary {
+                            summary.record_failure();
+                        }
                         tracing::warn!(
                             canonical_path = fingerprint.canonical_path.as_str(),
                             point_count,
@@ -436,6 +598,9 @@ impl WorkExecutor for PipelineExecutor {
                         return;
                     }
 
+                    if let Some(summary) = &self.summary {
+                        summary.record_success(point_count);
+                    }
                     tracing::info!(
                         canonical_path = fingerprint.canonical_path.as_str(),
                         point_count,
@@ -524,11 +689,21 @@ impl ShutdownHandle {
 pub struct AsyncRuntime<S: Source + Send + 'static> {
     runtime: Runtime<S>,
     capacity: usize,
+    summary: Option<IngestionSummary>,
 }
 
 impl<S: Source + Send + 'static> AsyncRuntime<S> {
     pub fn new(runtime: Runtime<S>, capacity: usize) -> Self {
-        Self { runtime, capacity }
+        Self {
+            runtime,
+            capacity,
+            summary: None,
+        }
+    }
+
+    pub fn with_summary(mut self, summary: IngestionSummary) -> Self {
+        self.summary = Some(summary);
+        self
     }
 
     /// Runs the planner loop and streams newly planned work items.
@@ -567,8 +742,15 @@ impl<S: Source + Send + 'static> AsyncRuntime<S> {
                     Err(_) => return,
                 };
                 let after = after_records.len();
+                let mut discovered_files = 0usize;
 
                 for record in after_records.into_iter().skip(before) {
+                    if matches!(
+                        record,
+                        WalRecord::WorkItem { .. } | WalRecord::WorkItemV2 { .. }
+                    ) {
+                        discovered_files += 1;
+                    }
                     if tx.send(record).await.is_err() {
                         return;
                     }
@@ -578,7 +760,14 @@ impl<S: Source + Send + 'static> AsyncRuntime<S> {
                     }
                 }
 
+                if let Some(summary) = &self.summary {
+                    summary.record_discovered(discovered_files);
+                }
+
                 if after == before {
+                    if let Some(summary) = &self.summary {
+                        summary.emit_if_ready("idle_window");
+                    }
                     tokio::select! {
                         _ = shutdown_rx.changed() => {
                             if *shutdown_rx.borrow() {
@@ -955,6 +1144,131 @@ mod tests {
         assert!(
             logs_contain("ragloom.ingest.success"),
             "expected ragloom.ingest.success event"
+        );
+
+        shutdown.shutdown();
+    }
+
+    #[test]
+    fn ingestion_summary_tracks_counts_and_resets_after_ready_emit() {
+        let summary = IngestionSummary::default();
+
+        summary.record_discovered(2);
+        summary.record_success(3);
+        summary.record_failure();
+
+        let snapshot = summary.snapshot();
+        assert_eq!(
+            snapshot,
+            IngestionSummarySnapshot {
+                discovered_files: 2,
+                indexed_files: 1,
+                failed_files: 1,
+                emitted_points: 3,
+                pending_files: 0,
+                elapsed_ms: snapshot.elapsed_ms,
+            }
+        );
+
+        assert!(summary.emit_if_ready("test"));
+
+        let reset = summary.snapshot();
+        assert_eq!(reset.discovered_files, 0);
+        assert_eq!(reset.indexed_files, 0);
+        assert_eq!(reset.failed_files, 0);
+        assert_eq!(reset.emitted_points, 0);
+        assert_eq!(reset.pending_files, 0);
+    }
+
+    #[tokio::test]
+    #[tracing_test::traced_test]
+    async fn async_runtime_emits_ingest_summary_when_window_finishes() {
+        use crate::sink::VectorPoint;
+
+        #[derive(Debug, Clone, Default)]
+        struct StubDocumentLoader;
+
+        #[async_trait::async_trait]
+        impl crate::doc::DocumentLoader for StubDocumentLoader {
+            async fn load_utf8(&self, _path: &str) -> Result<String, crate::error::RagloomError> {
+                Ok("hello from stub loader".to_string())
+            }
+        }
+
+        #[derive(Debug, Clone, Default)]
+        struct StubEmbeddingProvider;
+
+        #[async_trait::async_trait]
+        impl crate::embed::EmbeddingProvider for StubEmbeddingProvider {
+            async fn embed(
+                &self,
+                inputs: &[String],
+            ) -> Result<Vec<Vec<f32>>, crate::error::RagloomError> {
+                Ok(inputs.iter().map(|_| vec![1.0_f32, 2.0_f32]).collect())
+            }
+        }
+
+        #[derive(Debug, Clone, Default)]
+        struct StubSink;
+
+        #[async_trait::async_trait]
+        impl crate::sink::Sink for StubSink {
+            async fn upsert_points(
+                &self,
+                _points: Vec<VectorPoint>,
+            ) -> Result<(), crate::error::RagloomError> {
+                Ok(())
+            }
+        }
+
+        let wal = std::sync::Arc::new(tokio::sync::Mutex::new(
+            crate::state::wal::InMemoryWal::new(),
+        ));
+
+        let mut source = FakeSource::default();
+        source.push([42u8; 32]);
+
+        let summary = IngestionSummary::default();
+        let runtime = Runtime::with_shared_wal(source, std::sync::Arc::clone(&wal));
+        let (rx, shutdown) = AsyncRuntime::new(runtime, 1)
+            .with_summary(summary.clone())
+            .start();
+
+        let executor = AckingExecutor {
+            inner: PipelineExecutor::new(
+                std::sync::Arc::new(StubEmbeddingProvider),
+                std::sync::Arc::new(StubSink),
+                std::sync::Arc::new(StubDocumentLoader),
+            )
+            .with_summary(summary.clone()),
+            wal: std::sync::Arc::clone(&wal),
+        };
+
+        tokio::spawn(async move {
+            run_worker(rx, executor).await;
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        assert!(
+            logs_contain("ragloom.ingest.summary"),
+            "expected ragloom.ingest.summary event"
+        );
+        assert!(
+            logs_contain("trigger=\"idle_window\""),
+            "expected idle_window trigger"
+        );
+        assert!(
+            logs_contain("discovered_files=1"),
+            "expected discovered_files count"
+        );
+        assert!(
+            logs_contain("indexed_files=1"),
+            "expected indexed_files count"
+        );
+        assert!(
+            logs_contain("failed_files=0"),
+            "expected failed_files count"
         );
 
         shutdown.shutdown();

@@ -102,6 +102,7 @@ Success looks like this:
 
 - Ragloom starts and keeps running until you stop it with `Ctrl+C`
 - you see startup and ingestion logs instead of a `ragloom.fatal` error
+- you see a structured `ragloom.ingest.summary` event with counts such as `discovered_files`, `indexed_files`, `emitted_points`, and `failed_files`
 - points appear in the Qdrant collection `docs`
 
 ## Installation
@@ -330,7 +331,7 @@ This is the part of Ragloom that makes inspection easier: you can look at a poin
 
 ## Observability
 
-Ragloom emits `tracing` events for discovery, startup, embedding, Qdrant writes, and completion.
+Ragloom emits `tracing` events for discovery, startup, embedding, Qdrant writes, and ingest completion summaries.
 
 Environment variables:
 
@@ -344,6 +345,14 @@ RAGLOOM_LOG_FORMAT=json RAGLOOM_LOG=info ragloom --config ./ragloom.yaml --opena
 ```
 
 Ragloom does not log secrets, API keys, or full document contents.
+
+For first-run validation, look for `ragloom.ingest.summary`. Ragloom emits it after an ingest window goes idle and again on shutdown when there is still unreported work. The summary stays structured and includes counters such as:
+
+- `discovered_files`
+- `indexed_files`
+- `failed_files`
+- `emitted_points`
+- `pending_files`
 
 ## Roadmap
 
@@ -434,6 +443,8 @@ Check that your files are:
 - UTF-8 encoded
 - located somewhere under the configured directory
 - regular files rather than symbolic links
+
+If startup looks healthy but nothing appears in Qdrant, check the latest `ragloom.ingest.summary` event first. A non-zero `failed_files` or `pending_files` count usually narrows the problem down faster than scanning individual per-file log lines.
 
 ### OpenAI API errors
 
