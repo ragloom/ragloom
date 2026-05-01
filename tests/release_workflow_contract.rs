@@ -56,6 +56,7 @@ fn release_workflow_supports_version_dispatch_and_release_notes() {
 fn release_workflows_verify_tag_and_crate_version_consistency_and_pin_python() {
     let release_workflow = read_repo_file(".github/workflows/release.yml");
     let publish_workflow = read_repo_file(".github/workflows/publish-crate.yml");
+    let quality_workflow = read_repo_file(".github/workflows/quality-deep.yml");
 
     assert!(
         release_workflow.contains("verify-release-version"),
@@ -80,6 +81,14 @@ fn release_workflows_verify_tag_and_crate_version_consistency_and_pin_python() {
     assert!(
         publish_workflow.contains("python-version: \"3.11\""),
         "expected publish workflow to require Python 3.11 for tomllib"
+    );
+    assert!(
+        quality_workflow.contains("security-events: write"),
+        "expected deep quality workflow to request security-events permission"
+    );
+    assert!(
+        release_workflow.contains("security-events: write"),
+        "expected release workflow to grant security-events permission to reusable jobs"
     );
 }
 
