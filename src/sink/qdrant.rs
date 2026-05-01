@@ -31,13 +31,15 @@ pub struct QdrantSink {
 
 impl QdrantSink {
     pub fn new(config: QdrantConfig) -> Result<Self, RagloomError> {
-        let client = reqwest::Client::builder()
-            .timeout(config.timeout)
-            .build()
-            .map_err(|e| {
-                RagloomError::new(RagloomErrorKind::Sink, e)
-                    .with_context("failed to build Qdrant HTTP client")
-            })?;
+        let mut builder = reqwest::Client::builder().timeout(config.timeout);
+        if should_bypass_proxy(&config.base_url) {
+            builder = builder.no_proxy();
+        }
+
+        let client = builder.build().map_err(|e| {
+            RagloomError::new(RagloomErrorKind::Sink, e)
+                .with_context("failed to build Qdrant HTTP client")
+        })?;
 
         Ok(Self { config, client })
     }
@@ -145,6 +147,13 @@ impl QdrantSink {
     }
 }
 
+fn should_bypass_proxy(base_url: &str) -> bool {
+    reqwest::Url::parse(base_url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_owned))
+        .is_some_and(|host| matches!(host.as_str(), "localhost" | "127.0.0.1" | "::1"))
+}
+
 #[async_trait::async_trait]
 impl Sink for QdrantSink {
     async fn upsert_points(&self, points: Vec<VectorPoint>) -> Result<(), RagloomError> {
@@ -243,7 +252,7 @@ mod tests {
 
     use std::collections::VecDeque;
     use std::io::{Read, Write};
-    use std::net::TcpListener;
+    use std::net::{Shutdown, TcpListener};
     use std::sync::{Arc, Mutex};
 
     use crate::sink::{PointId, VectorPoint};
@@ -303,13 +312,15 @@ mod tests {
                     .pop_front()
                     .expect("response");
                 let response = format!(
-                    "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                    "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                     response.status,
                     response.reason,
                     response.body.len(),
                     response.body
                 );
                 let _ = stream.write_all(response.as_bytes());
+                let _ = stream.flush();
+                let _ = stream.shutdown(Shutdown::Both);
 
                 if thread_responses.lock().expect("responses lock").is_empty() {
                     break;
@@ -328,6 +339,13 @@ mod tests {
         }
     }
 
+    #[test]
+    fn bypasses_proxy_for_loopback_qdrant_urls() {
+        assert!(should_bypass_proxy("http://127.0.0.1:6333"));
+        assert!(should_bypass_proxy("http://localhost:6333"));
+        assert!(!should_bypass_proxy("https://qdrant.example.com"));
+    }
+
     #[cfg_attr(miri, ignore = "Miri does not support TCP socket tests")]
     #[tokio::test]
     async fn non_success_status_is_reported_as_error() {
@@ -336,7 +354,7 @@ mod tests {
         let sink = QdrantSink::new(QdrantConfig {
             base_url,
             collection: "docs".to_string(),
-            timeout: Duration::from_secs(1),
+            timeout: Duration::from_secs(5),
         })
         .expect("sink");
 
@@ -357,7 +375,7 @@ mod tests {
         let sink = QdrantSink::new(QdrantConfig {
             base_url,
             collection: "docs".to_string(),
-            timeout: Duration::from_secs(1),
+            timeout: Duration::from_secs(5),
         })
         .expect("sink");
 
@@ -372,7 +390,7 @@ mod tests {
         let sink = QdrantSink::new(QdrantConfig {
             base_url,
             collection: "docs".to_string(),
-            timeout: Duration::from_secs(1),
+            timeout: Duration::from_secs(5),
         })
         .expect("sink");
 
@@ -394,7 +412,7 @@ mod tests {
         let sink = QdrantSink::new(QdrantConfig {
             base_url,
             collection: "docs".to_string(),
-            timeout: Duration::from_secs(1),
+            timeout: Duration::from_secs(5),
         })
         .expect("sink");
 
@@ -416,7 +434,7 @@ mod tests {
         let sink = QdrantSink::new(QdrantConfig {
             base_url,
             collection: "docs".to_string(),
-            timeout: Duration::from_secs(1),
+            timeout: Duration::from_secs(5),
         })
         .expect("sink");
 
@@ -442,7 +460,7 @@ mod tests {
         let sink = QdrantSink::new(QdrantConfig {
             base_url,
             collection: "docs".to_string(),
-            timeout: Duration::from_secs(1),
+            timeout: Duration::from_secs(5),
         })
         .expect("sink");
 
@@ -466,7 +484,7 @@ mod tests {
         let sink = QdrantSink::new(QdrantConfig {
             base_url,
             collection: "docs".to_string(),
-            timeout: Duration::from_secs(1),
+            timeout: Duration::from_secs(5),
         })
         .expect("sink");
 

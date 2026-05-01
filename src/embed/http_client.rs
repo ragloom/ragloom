@@ -36,16 +36,25 @@ pub struct HttpEmbeddingClient {
 
 impl HttpEmbeddingClient {
     pub fn new(config: HttpEmbeddingConfig) -> Result<Self, RagloomError> {
-        let client = reqwest::Client::builder()
-            .timeout(config.timeout)
-            .build()
-            .map_err(|e| {
-                RagloomError::new(RagloomErrorKind::Embed, e)
-                    .with_context("failed to build HTTP client")
-            })?;
+        let mut builder = reqwest::Client::builder().timeout(config.timeout);
+        if should_bypass_proxy(&config.endpoint) {
+            builder = builder.no_proxy();
+        }
+
+        let client = builder.build().map_err(|e| {
+            RagloomError::new(RagloomErrorKind::Embed, e)
+                .with_context("failed to build HTTP client")
+        })?;
 
         Ok(Self { config, client })
     }
+}
+
+fn should_bypass_proxy(endpoint: &str) -> bool {
+    reqwest::Url::parse(endpoint)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_owned))
+        .is_some_and(|host| matches!(host.as_str(), "localhost" | "127.0.0.1" | "::1"))
 }
 
 #[derive(Debug, Serialize)]
@@ -106,7 +115,7 @@ mod tests {
     use super::*;
 
     use std::io::{Read, Write};
-    use std::net::TcpListener;
+    use std::net::{Shutdown, TcpListener};
 
     use crate::embed::EmbeddingProvider;
 
@@ -120,14 +129,23 @@ mod tests {
                 let _ = stream.read(&mut buf);
 
                 let response = format!(
-                    "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                    "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
                 );
                 let _ = stream.write_all(response.as_bytes());
+                let _ = stream.flush();
+                let _ = stream.shutdown(Shutdown::Both);
             }
         });
 
         format!("http://{addr}")
+    }
+
+    #[test]
+    fn bypasses_proxy_for_loopback_endpoints() {
+        assert!(should_bypass_proxy("http://127.0.0.1:6333"));
+        assert!(should_bypass_proxy("http://localhost:8080/embed"));
+        assert!(!should_bypass_proxy("https://api.openai.com/v1/embeddings"));
     }
 
     #[cfg_attr(miri, ignore = "Miri does not support TCP socket tests")]
@@ -138,7 +156,7 @@ mod tests {
         let client = HttpEmbeddingClient::new(HttpEmbeddingConfig {
             endpoint,
             model: "test".to_string(),
-            timeout: Duration::from_secs(1),
+            timeout: Duration::from_secs(5),
         })
         .expect("client");
 
@@ -159,7 +177,7 @@ mod tests {
         let client = HttpEmbeddingClient::new(HttpEmbeddingConfig {
             endpoint,
             model: "test".to_string(),
-            timeout: Duration::from_secs(1),
+            timeout: Duration::from_secs(5),
         })
         .expect("client");
 

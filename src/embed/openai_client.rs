@@ -56,17 +56,27 @@ impl OpenAiEmbeddingClient {
         headers.insert(AUTHORIZATION, auth_value);
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
-        let client = reqwest::Client::builder()
+        let mut builder = reqwest::Client::builder()
             .default_headers(headers)
-            .timeout(config.timeout)
-            .build()
-            .map_err(|e| {
-                RagloomError::new(RagloomErrorKind::Embed, e)
-                    .with_context("failed to build OpenAI HTTP client")
-            })?;
+            .timeout(config.timeout);
+        if should_bypass_proxy(&config.endpoint) {
+            builder = builder.no_proxy();
+        }
+
+        let client = builder.build().map_err(|e| {
+            RagloomError::new(RagloomErrorKind::Embed, e)
+                .with_context("failed to build OpenAI HTTP client")
+        })?;
 
         Ok(Self { config, client })
     }
+}
+
+fn should_bypass_proxy(endpoint: &str) -> bool {
+    reqwest::Url::parse(endpoint)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_owned))
+        .is_some_and(|host| matches!(host.as_str(), "localhost" | "127.0.0.1" | "::1"))
 }
 
 #[derive(Debug, Serialize)]
@@ -132,7 +142,7 @@ mod tests {
 
     fn spawn_test_server(status: u16, body: &'static str) -> String {
         use std::io::{Read, Write};
-        use std::net::TcpListener;
+        use std::net::{Shutdown, TcpListener};
 
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
         let addr = listener.local_addr().expect("addr");
@@ -143,15 +153,24 @@ mod tests {
             let _ = stream.read(&mut buf);
 
             let response = format!(
-                "HTTP/1.1 {} OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\n\r\n{}",
+                "HTTP/1.1 {} OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{}",
                 status,
                 body.len(),
                 body
             );
             stream.write_all(response.as_bytes()).expect("write");
+            stream.flush().expect("flush");
+            stream.shutdown(Shutdown::Both).expect("shutdown");
         });
 
         format!("http://{}", addr)
+    }
+
+    #[test]
+    fn bypasses_proxy_for_loopback_endpoints() {
+        assert!(should_bypass_proxy("http://127.0.0.1:6333"));
+        assert!(should_bypass_proxy("http://localhost:8080/v1/embeddings"));
+        assert!(!should_bypass_proxy("https://api.openai.com/v1/embeddings"));
     }
 
     #[cfg_attr(miri, ignore = "Miri does not support TCP socket tests")]

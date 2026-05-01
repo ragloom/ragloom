@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-05-01
+
 ### Added
 - Pluggable `Chunker` trait with `RecursiveChunker` (phase 1 of the smart
   chunking roadmap) backed by the `chonkie-inc/chunk` SIMD byte-level engine.

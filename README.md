@@ -358,6 +358,8 @@ For first-run validation, look for `ragloom.ingest.summary`. Ragloom emits it af
 
 ### v0.1 - First-run experience
 
+Status: shipped in `v0.1.0`.
+
 - example environment for local Qdrant setup
 - clearer ingestion summary at runtime
 - release binaries
