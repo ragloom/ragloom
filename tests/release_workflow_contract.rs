@@ -90,6 +90,14 @@ fn release_workflows_verify_tag_and_crate_version_consistency_and_pin_python() {
         release_workflow.contains("security-events: write"),
         "expected release workflow to grant security-events permission to reusable jobs"
     );
+    assert!(
+        quality_workflow.contains("timeout-minutes: 90"),
+        "expected deep quality Miri job to stay bounded in CI"
+    );
+    assert!(
+        quality_workflow.contains("cargo +nightly miri test -p ragloom --lib"),
+        "expected deep quality Miri job to use the bounded crate-level command"
+    );
 }
 
 #[test]

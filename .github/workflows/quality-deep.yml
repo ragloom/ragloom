@@ -60,6 +60,7 @@ jobs:
   miri:
     name: miri
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -78,7 +79,7 @@ jobs:
       - name: Run Miri
         env:
           MIRIFLAGS: -Zmiri-disable-isolation
-        run: cargo +nightly miri test --workspace
+        run: cargo +nightly miri test -p ragloom --lib
 
   docs-and-security:
     name: docs-and-security

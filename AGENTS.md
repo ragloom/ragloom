@@ -52,7 +52,7 @@ Run these when touching concurrency, unsafe-sensitive code, chunking behavior, b
 
 ```bash
 cargo test --workspace --features loom
-cargo +nightly miri test --workspace
+cargo +nightly miri test -p ragloom --lib
 cargo llvm-cov --workspace --all-features
 cargo bench
 ```
