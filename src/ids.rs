@@ -15,7 +15,7 @@ use blake3::Hasher;
 ///
 /// This type is intentionally small and explicit so it can be constructed from
 /// multiple sources (filesystem scan, file watcher events, tests).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, std::hash::Hash, serde::Serialize, serde::Deserialize)]
 pub struct FileFingerprint {
     pub canonical_path: String,
     pub size_bytes: u64,
