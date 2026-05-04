@@ -37,12 +37,12 @@ Supported today:
 - OpenAI and generic HTTP embedding APIs
 - Qdrant sink
 - deterministic point IDs
+- persistent local WAL state
 - pretty and JSON structured logs
 
 Not supported yet:
 
 - PDF or DOCX parsing
-- persistent WAL
 - production retry or dead-letter queues
 - built-in collection lifecycle management
 
@@ -70,6 +70,7 @@ cargo run --release -- \
   --dir ./docs \
   --qdrant-url http://localhost:6333 \
   --collection docs \
+  --state-path ./.ragloom/wal.ndjson \
   --create-collection-if-missing \
   --openai-api-key "$OPENAI_API_KEY"
 ```
@@ -184,6 +185,9 @@ embed:
 sink:
   qdrant_url: "http://localhost:6333"
   collection: "docs"
+
+state:
+  path: ".ragloom/wal.ndjson"
 ```
 
 Run with:
@@ -208,6 +212,7 @@ ragloom --config ./ragloom.yaml --embed-backend http --embed-model default
 ### Configuration notes
 
 - `--config` can provide `source.root`, `embed.endpoint`, `sink.qdrant_url`, and `sink.collection`
+- `--config` can also provide `state.path`; the CLI flag is `--state-path`
 - backend-specific auth still comes from CLI flags, such as `--openai-api-key`
 - chunker settings are currently configured by CLI flags, not by YAML
 - flags support both `--flag value` and `--flag=value`
@@ -263,7 +268,17 @@ Writes vectors and metadata into a destination such as Qdrant.
 
 ### State
 
-Tracks discovered work and acknowledgements in an in-memory WAL.
+Tracks discovered work and acknowledgements in an append-only local WAL.
+
+By default, Ragloom stores state at `.ragloom/wal.ndjson` relative to the
+current working directory. Pass `--state-path <path>` or set `state.path` in the
+YAML config to choose another file.
+
+The WAL is newline-delimited JSON and records planned `WorkItemV2` entries plus
+`SinkAckV2` acknowledgements. On startup, Ragloom replays work items that do not
+have a matching acknowledgement and seeds planner de-duplication from the WAL so
+already acknowledged file versions are not planned again. Corrupt or unreadable
+state files fail startup with a `state` error instead of being ignored.
 
 ## Architecture
 
@@ -395,7 +410,7 @@ Status: shipped in `v0.1.1`.
 
 ### v0.2 - More reliable daemon behavior
 
-- persistent local state
+- persistent local state (shipped on `main`)
 - retry queue
 - delete detection
 - health endpoint
@@ -499,7 +514,6 @@ curl https://api.openai.com/v1/embeddings \
 - only local filesystem input
 - only Qdrant as a built-in sink
 - only UTF-8 file loading
-- no persistent WAL yet
 - no general collection lifecycle management beyond optional first-run bootstrap
 - no production retry queue yet
 

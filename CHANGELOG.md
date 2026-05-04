@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+- Persistent local WAL state via `FileWal`, stored by default at
+  `.ragloom/wal.ndjson` and configurable with `--state-path` or `state.path`.
+- Startup replay for unacknowledged `WorkItemV2` records, with acknowledged file
+  versions seeded into planner de-duplication to avoid re-emitting completed
+  work after restart.
+
+### Notes
+- The WAL format is append-only newline-delimited JSON. Corrupt or unreadable
+  state files fail startup with a `state` error so operators can inspect or
+  replace the file intentionally.
+
 ## [0.1.0] - 2026-05-01
 
 ### Added
