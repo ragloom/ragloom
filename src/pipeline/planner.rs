@@ -8,7 +8,7 @@
 use std::collections::HashSet;
 
 use crate::source::FileVersionDiscovered;
-use crate::state::wal::WalRecord;
+use crate::state::wal::{WalRecord, WalStore};
 
 use crate::error::RagloomError;
 
@@ -27,6 +27,19 @@ impl Planner {
         Self::default()
     }
 
+    pub fn from_wal_records(records: &[WalRecord]) -> Self {
+        let planned_versions = records
+            .iter()
+            .map(|record| match record {
+                WalRecord::WorkItemV2 { fingerprint } | WalRecord::SinkAckV2 { fingerprint } => {
+                    crate::ids::file_version_id(fingerprint)
+                }
+                WalRecord::WorkItem { chunk_id } | WalRecord::SinkAck { chunk_id } => *chunk_id,
+            })
+            .collect();
+        Self { planned_versions }
+    }
+
     /// Plans work for a discovery event.
     ///
     /// # Why
@@ -35,7 +48,7 @@ impl Planner {
     pub fn plan_file_version(
         &mut self,
         discovered: &FileVersionDiscovered,
-        wal: &std::sync::Arc<tokio::sync::Mutex<crate::state::wal::InMemoryWal>>,
+        wal: &std::sync::Arc<tokio::sync::Mutex<impl WalStore>>,
     ) -> Result<(), RagloomError> {
         if !self.planned_versions.insert(discovered.file_version_id) {
             return Ok(());

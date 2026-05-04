@@ -8,7 +8,7 @@
 use crate::error::{RagloomError, RagloomErrorKind};
 use crate::pipeline::planner::Planner;
 use crate::source::Source;
-use crate::state::wal::{InMemoryWal, WalRecord};
+use crate::state::wal::{InMemoryWal, WalRecord, WalStore, unacked_work_items};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 struct IngestionSummarySnapshot {
@@ -255,13 +255,13 @@ fn file_extension_from_canonical_path(canonical_path: &str) -> String {
 /// The MVP does not require distributed execution. Keeping the runtime small
 /// makes it easier to reason about crash recovery and idempotency.
 #[derive(Debug)]
-pub struct Runtime<S: Source> {
+pub struct Runtime<S: Source, W: WalStore = InMemoryWal> {
     source: S,
     planner: Planner,
-    wal: std::sync::Arc<tokio::sync::Mutex<InMemoryWal>>,
+    wal: std::sync::Arc<tokio::sync::Mutex<W>>,
 }
 
-impl<S: Source> Runtime<S> {
+impl<S: Source> Runtime<S, InMemoryWal> {
     pub fn new(source: S) -> Self {
         Self::with_wal(source, InMemoryWal::new())
     }
@@ -269,14 +269,19 @@ impl<S: Source> Runtime<S> {
     pub fn with_wal(source: S, wal: InMemoryWal) -> Self {
         Self::with_shared_wal(source, std::sync::Arc::new(tokio::sync::Mutex::new(wal)))
     }
+}
 
-    pub fn with_shared_wal(
-        source: S,
-        wal: std::sync::Arc<tokio::sync::Mutex<InMemoryWal>>,
-    ) -> Self {
+impl<S: Source, W: WalStore> Runtime<S, W> {
+    pub fn with_shared_wal(source: S, wal: std::sync::Arc<tokio::sync::Mutex<W>>) -> Self {
+        let planner = wal
+            .try_lock()
+            .ok()
+            .and_then(|guard| guard.read_all().ok())
+            .map(|records| Planner::from_wal_records(&records))
+            .unwrap_or_default();
         Self {
             source,
-            planner: Planner::new(),
+            planner,
             wal,
         }
     }
@@ -633,13 +638,13 @@ impl WorkExecutor for PipelineExecutor {
 /// Acking at the boundary (after side effects) is the minimal WAL signal we need
 /// for replay and near exactly-once semantics.
 #[derive(Debug, Clone)]
-pub struct AckingExecutor<E: WorkExecutor> {
+pub struct AckingExecutor<E: WorkExecutor, W: WalStore = InMemoryWal> {
     pub inner: E,
-    pub wal: std::sync::Arc<tokio::sync::Mutex<crate::state::wal::InMemoryWal>>,
+    pub wal: std::sync::Arc<tokio::sync::Mutex<W>>,
 }
 
 #[async_trait::async_trait]
-impl<E: WorkExecutor> WorkExecutor for AckingExecutor<E> {
+impl<E: WorkExecutor, W: WalStore + 'static> WorkExecutor for AckingExecutor<E, W> {
     async fn execute(&self, record: WalRecord) {
         let ack = match &record {
             WalRecord::WorkItem { chunk_id } => Some(WalRecord::SinkAck {
@@ -690,14 +695,14 @@ impl ShutdownHandle {
 /// add an async runner that turns planned WAL records into a bounded stream for
 /// downstream workers.
 #[derive(Debug)]
-pub struct AsyncRuntime<S: Source + Send + 'static> {
-    runtime: Runtime<S>,
+pub struct AsyncRuntime<S: Source + Send + 'static, W: WalStore = InMemoryWal> {
+    runtime: Runtime<S, W>,
     capacity: usize,
     summary: Option<IngestionSummary>,
 }
 
-impl<S: Source + Send + 'static> AsyncRuntime<S> {
-    pub fn new(runtime: Runtime<S>, capacity: usize) -> Self {
+impl<S: Source + Send + 'static, W: WalStore + 'static> AsyncRuntime<S, W> {
+    pub fn new(runtime: Runtime<S, W>, capacity: usize) -> Self {
         Self {
             runtime,
             capacity,
@@ -720,6 +725,30 @@ impl<S: Source + Send + 'static> AsyncRuntime<S> {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
 
         tokio::spawn(async move {
+            let replay_records = match self.runtime.try_wal_records() {
+                Ok(records) => unacked_work_items(&records),
+                Err(err) if err.kind == RagloomErrorKind::Internal => Vec::new(),
+                Err(_) => return,
+            };
+            let mut replayed_files = 0usize;
+            for record in replay_records {
+                if matches!(
+                    record,
+                    WalRecord::WorkItem { .. } | WalRecord::WorkItemV2 { .. }
+                ) {
+                    replayed_files += 1;
+                }
+                if tx.send(record).await.is_err() {
+                    return;
+                }
+                if shutdown_rx.has_changed().unwrap_or(false) && *shutdown_rx.borrow() {
+                    return;
+                }
+            }
+            if let Some(summary) = &self.summary {
+                summary.record_discovered(replayed_files);
+            }
+
             loop {
                 if *shutdown_rx.borrow() {
                     return;
@@ -1018,6 +1047,99 @@ mod tests {
         );
 
         shutdown.shutdown();
+    }
+
+    #[tokio::test]
+    async fn async_runtime_replays_unacked_work_before_new_discovery() {
+        let wal = std::sync::Arc::new(tokio::sync::Mutex::new(
+            crate::state::wal::InMemoryWal::new(),
+        ));
+        let replayed = crate::ids::FileFingerprint {
+            canonical_path: "/x/replayed.txt".to_string(),
+            size_bytes: 10,
+            mtime_unix_secs: 100,
+        };
+        let acked = crate::ids::FileFingerprint {
+            canonical_path: "/x/acked.txt".to_string(),
+            size_bytes: 20,
+            mtime_unix_secs: 200,
+        };
+        {
+            let mut guard = wal.lock().await;
+            guard
+                .append(WalRecord::WorkItemV2 {
+                    fingerprint: replayed.clone(),
+                })
+                .expect("append replayed work");
+            guard
+                .append(WalRecord::WorkItemV2 {
+                    fingerprint: acked.clone(),
+                })
+                .expect("append acked work");
+            guard
+                .append(WalRecord::SinkAckV2 {
+                    fingerprint: acked.clone(),
+                })
+                .expect("append ack");
+        }
+
+        let source = FakeSource::default();
+        let runtime = Runtime::with_shared_wal(source, std::sync::Arc::clone(&wal));
+        let (mut rx, shutdown) = AsyncRuntime::new(runtime, 4).start();
+
+        let item = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .expect("should replay")
+            .expect("record");
+        assert_eq!(
+            item,
+            WalRecord::WorkItemV2 {
+                fingerprint: replayed
+            }
+        );
+
+        let no_acked_replay =
+            tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv()).await;
+        assert!(no_acked_replay.is_err());
+
+        shutdown.shutdown();
+    }
+
+    #[tokio::test]
+    async fn runtime_does_not_replan_file_versions_already_in_wal() {
+        let wal = std::sync::Arc::new(tokio::sync::Mutex::new(
+            crate::state::wal::InMemoryWal::new(),
+        ));
+        let fingerprint = crate::ids::FileFingerprint {
+            canonical_path: "/x/a.txt".to_string(),
+            size_bytes: 10,
+            mtime_unix_secs: 100,
+        };
+        {
+            let mut guard = wal.lock().await;
+            guard
+                .append(WalRecord::WorkItemV2 {
+                    fingerprint: fingerprint.clone(),
+                })
+                .expect("append work");
+            guard
+                .append(WalRecord::SinkAckV2 {
+                    fingerprint: fingerprint.clone(),
+                })
+                .expect("append ack");
+        }
+
+        let mut source = FakeSource::default();
+        source.pending.push(FileVersionDiscovered {
+            file_version_id: crate::ids::file_version_id(&fingerprint),
+            fingerprint,
+        });
+        let mut runtime = Runtime::with_shared_wal(source, std::sync::Arc::clone(&wal));
+
+        runtime.tick();
+
+        let records = wal.lock().await.read_all().expect("read");
+        assert_eq!(records.len(), 2);
     }
 
     #[tokio::test]

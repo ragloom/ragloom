@@ -19,6 +19,8 @@ pub struct PipelineConfig {
     pub source: SourceConfig,
     pub embed: EmbedConfig,
     pub sink: SinkConfig,
+    #[serde(default)]
+    pub state: StateConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -35,6 +37,24 @@ pub struct EmbedConfig {
 pub struct SinkConfig {
     pub qdrant_url: String,
     pub collection: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct StateConfig {
+    #[serde(default = "default_state_path")]
+    pub path: String,
+}
+
+impl Default for StateConfig {
+    fn default() -> Self {
+        Self {
+            path: default_state_path(),
+        }
+    }
+}
+
+fn default_state_path() -> String {
+    ".ragloom/wal.ndjson".to_string()
 }
 
 impl PipelineConfig {
@@ -72,6 +92,10 @@ impl PipelineConfig {
             return Err(RagloomError::from_kind(RagloomErrorKind::Config)
                 .with_context("sink.collection is empty"));
         }
+        if self.state.path.trim().is_empty() {
+            return Err(RagloomError::from_kind(RagloomErrorKind::Config)
+                .with_context("state.path is empty"));
+        }
         Ok(())
     }
 }
@@ -90,8 +114,11 @@ embed:
 sink:
   qdrant_url: "http://localhost:6333"
   collection: "docs"
+state:
+  path: ".ragloom/wal.ndjson"
 "#;
         let cfg = PipelineConfig::from_yaml_str(yaml).expect("parse");
         cfg.validate().expect("validate");
+        assert_eq!(cfg.state.path, ".ragloom/wal.ndjson");
     }
 }

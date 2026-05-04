@@ -28,6 +28,7 @@ pub struct RunConfig {
     pub embed_backend: EmbedBackend,
     pub qdrant_url: String,
     pub collection: String,
+    pub state_path: String,
     pub create_collection_if_missing: bool,
     pub collection_vector_size: Option<usize>,
     pub chunker_strategy: String,
@@ -43,7 +44,8 @@ pub struct RunConfig {
     pub semantic_percentile: u8,
 }
 
-const USAGE: &str = "usage: ragloom [--config <path>] --dir <path> --qdrant-url <url> --collection <name> [--embed-backend <openai|http>]";
+const DEFAULT_STATE_PATH: &str = ".ragloom/wal.ndjson";
+const USAGE: &str = "usage: ragloom [--config <path>] --dir <path> --qdrant-url <url> --collection <name> [--state-path <path>] [--embed-backend <openai|http>]";
 
 /// Top-level CLI command selected by argument parsing.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -92,6 +94,7 @@ pub fn parse_args(args: &[String]) -> Result<ParsedCommand, RagloomError> {
 
     let mut qdrant_url: Option<String> = None;
     let mut collection: Option<String> = None;
+    let mut state_path: Option<String> = None;
     let mut create_collection_if_missing = false;
     let mut collection_vector_size: Option<String> = None;
 
@@ -135,6 +138,7 @@ pub fn parse_args(args: &[String]) -> Result<ParsedCommand, RagloomError> {
 
             "--qdrant-url" => qdrant_url = next_value(),
             "--collection" => collection = next_value(),
+            "--state-path" => state_path = next_value(),
             "--create-collection-if-missing" => {
                 if inline_value.is_some() {
                     return Err(cli_invalid_input(
@@ -189,6 +193,12 @@ pub fn parse_args(args: &[String]) -> Result<ParsedCommand, RagloomError> {
         .ok_or_else(|| {
             cli_config_error("missing required value: --collection or sink.collection in --config")
         })?;
+    let state_path = state_path
+        .or_else(|| file_config.as_ref().map(|c| c.state.path.clone()))
+        .unwrap_or_else(|| DEFAULT_STATE_PATH.to_string());
+    if state_path.trim().is_empty() {
+        return Err(cli_config_error("--state-path or state.path is empty"));
+    }
     let collection_vector_size = collection_vector_size
         .map(|s| {
             s.parse::<usize>().map_err(|e| {
@@ -375,6 +385,7 @@ pub fn parse_args(args: &[String]) -> Result<ParsedCommand, RagloomError> {
         embed_backend,
         qdrant_url,
         collection,
+        state_path,
         create_collection_if_missing,
         collection_vector_size,
         chunker_strategy,
@@ -717,7 +728,8 @@ async fn try_main() -> Result<(), RagloomError> {
     } = prepare_startup(&cfg).await?;
 
     let wal = std::sync::Arc::new(tokio::sync::Mutex::new(
-        ragloom::state::wal::InMemoryWal::new(),
+        ragloom::state::wal::FileWal::open(&cfg.state_path)
+            .map_err(|e| e.with_context("failed to initialize persistent WAL"))?,
     ));
 
     let runtime = Runtime::with_shared_wal(source, std::sync::Arc::clone(&wal));
@@ -956,6 +968,7 @@ mod tests {
                 },
                 qdrant_url: "http://qdrant".to_string(),
                 collection: "docs".to_string(),
+                state_path: DEFAULT_STATE_PATH.to_string(),
                 create_collection_if_missing: false,
                 collection_vector_size: None,
                 chunker_strategy: "recursive".to_string(),
@@ -971,6 +984,57 @@ mod tests {
                 semantic_percentile: 95,
             }))
         );
+    }
+
+    #[test]
+    fn parse_args_defaults_state_path() {
+        let args = vec![
+            "ragloom".to_string(),
+            "--dir".to_string(),
+            "/tmp/docs".to_string(),
+            "--embed-backend".to_string(),
+            "http".to_string(),
+            "--embed-url".to_string(),
+            "http://embed".to_string(),
+            "--embed-model".to_string(),
+            "default".to_string(),
+            "--qdrant-url".to_string(),
+            "http://qdrant".to_string(),
+            "--collection".to_string(),
+            "docs".to_string(),
+        ];
+
+        let cfg = parse_args(&args).expect("config");
+        let ParsedCommand::Run(cfg) = cfg else {
+            panic!("expected run config");
+        };
+        assert_eq!(cfg.state_path, DEFAULT_STATE_PATH);
+    }
+
+    #[test]
+    fn parse_args_accepts_state_path_inline_value() {
+        let args = vec![
+            "ragloom".to_string(),
+            "--dir".to_string(),
+            "/tmp/docs".to_string(),
+            "--embed-backend".to_string(),
+            "http".to_string(),
+            "--embed-url".to_string(),
+            "http://embed".to_string(),
+            "--embed-model".to_string(),
+            "default".to_string(),
+            "--qdrant-url".to_string(),
+            "http://qdrant".to_string(),
+            "--collection".to_string(),
+            "docs".to_string(),
+            "--state-path=.state/ragloom.ndjson".to_string(),
+        ];
+
+        let cfg = parse_args(&args).expect("config");
+        let ParsedCommand::Run(cfg) = cfg else {
+            panic!("expected run config");
+        };
+        assert_eq!(cfg.state_path, ".state/ragloom.ndjson");
     }
 
     #[test]
@@ -1196,6 +1260,7 @@ mod tests {
             },
             qdrant_url: "http://qdrant".to_string(),
             collection: "docs".to_string(),
+            state_path: DEFAULT_STATE_PATH.to_string(),
             create_collection_if_missing: true,
             collection_vector_size: Some(768),
             chunker_strategy: "recursive".to_string(),
@@ -1226,6 +1291,7 @@ mod tests {
             },
             qdrant_url: "http://qdrant".to_string(),
             collection: "docs".to_string(),
+            state_path: DEFAULT_STATE_PATH.to_string(),
             create_collection_if_missing: true,
             collection_vector_size: None,
             chunker_strategy: "recursive".to_string(),
@@ -1255,6 +1321,7 @@ mod tests {
             },
             qdrant_url: "http://qdrant".to_string(),
             collection: "docs".to_string(),
+            state_path: DEFAULT_STATE_PATH.to_string(),
             create_collection_if_missing: true,
             collection_vector_size: None,
             chunker_strategy: "recursive".to_string(),
@@ -1291,6 +1358,7 @@ mod tests {
             },
             qdrant_url: base_url,
             collection: "docs".to_string(),
+            state_path: DEFAULT_STATE_PATH.to_string(),
             create_collection_if_missing: true,
             collection_vector_size: None,
             chunker_strategy: "recursive".to_string(),
@@ -1346,6 +1414,7 @@ mod tests {
             },
             qdrant_url: base_url.clone(),
             collection: "docs".to_string(),
+            state_path: DEFAULT_STATE_PATH.to_string(),
             create_collection_if_missing: true,
             collection_vector_size: None,
             chunker_strategy: "recursive".to_string(),
@@ -1402,6 +1471,7 @@ mod tests {
             },
             qdrant_url: base_url.clone(),
             collection: "docs".to_string(),
+            state_path: DEFAULT_STATE_PATH.to_string(),
             create_collection_if_missing: true,
             collection_vector_size: Some(768),
             chunker_strategy: "recursive".to_string(),
@@ -1446,6 +1516,7 @@ mod tests {
             },
             qdrant_url: "http://127.0.0.1:1".to_string(),
             collection: "docs".to_string(),
+            state_path: DEFAULT_STATE_PATH.to_string(),
             create_collection_if_missing: true,
             collection_vector_size: None,
             chunker_strategy: "recursive".to_string(),
@@ -1523,6 +1594,8 @@ embed:
 sink:
   qdrant_url: "http://qdrant-from-config"
   collection: "from-config"
+state:
+  path: ".state/from-config.ndjson"
 "#,
         )
         .expect("write config");
@@ -1542,6 +1615,7 @@ sink:
         assert_eq!(cfg.dir, "/tmp/from-config");
         assert_eq!(cfg.qdrant_url, "http://qdrant-from-config");
         assert_eq!(cfg.collection, "from-config");
+        assert_eq!(cfg.state_path, ".state/from-config.ndjson");
         assert_eq!(
             cfg.embed_backend,
             EmbedBackend::Http {
