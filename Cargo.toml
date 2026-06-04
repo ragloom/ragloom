@@ -29,7 +29,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 chunk = "0.10"
 fastembed = { version = "5", optional = true }
-tiktoken-rs = "0.11"
+tiktoken-rs = "0.12"
 pulldown-cmark = "0.13"
 unicode-segmentation = "1"
 tree-sitter = "0.26"
