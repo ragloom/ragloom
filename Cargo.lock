@@ -442,9 +442,9 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
 name = "chunk"
-version = "0.10.1"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "113e21f5963090d0191da9d051fd35d93bc771054bf985f386e31a63cba719f9"
+checksum = "45b9676eb73ad3ebff08c750261a0d6a423f225883f30164600db57ba885e834"
 dependencies = [
  "daggrs",
  "memchr",
