@@ -126,7 +126,7 @@ mod tests {
     use std::io::Write;
 
     use super::*;
-    use zip::write::FileOptions;
+    use zip::write::SimpleFileOptions as FileOptions;
 
     fn write_test_file(dir: &tempfile::TempDir, name: &str, bytes: &[u8]) -> std::path::PathBuf {
         let path = dir.path().join(name);

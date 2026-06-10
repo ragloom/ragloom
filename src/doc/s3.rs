@@ -55,7 +55,7 @@ mod tests {
     use super::*;
 
     use crate::s3::S3ObjectMeta;
-    use zip::write::FileOptions;
+    use zip::write::SimpleFileOptions as FileOptions;
 
     fn minimal_pdf_bytes(stream: &str) -> Vec<u8> {
         let objects = [
