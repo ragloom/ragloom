@@ -381,8 +381,8 @@ fn release_workflow_packages_named_assets_and_keeps_macos_best_effort() {
         publish_best_effort_yaml.contains("pattern: release-*-apple-darwin")
             && workflow_pins_action_with_comment(
                 &workflow_yaml,
-                "softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65",
-                "v2",
+                "softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda",
+                "v3.0.0",
             ),
         "expected successful macOS artifacts to be appended to the GitHub Release after the blocking targets publish with a full SHA pin and preserved source version comment"
     );
