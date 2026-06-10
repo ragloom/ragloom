@@ -12,6 +12,7 @@ allow = [
     "CDLA-Permissive-2.0",
     "Unicode-3.0",
     "ISC",
+    "Zlib",
 ]
 # rust-s3 currently pulls these transitively for sync HTTP transport and aws-creds.
 # Keep the exception scoped to the exact crates instead of globally allowing the licenses.
