@@ -111,8 +111,8 @@ fn release_workflows_verify_tag_and_crate_version_consistency_and_pin_python() {
     assert!(
         workflow_pins_action_with_comment(
             &release_workflow,
-            "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065",
-            "v5",
+            "actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405",
+            "v6.2.0",
         ),
         "expected release workflow to pin Python for the verification script to a full SHA and preserve the source version comment"
     );
@@ -123,8 +123,8 @@ fn release_workflows_verify_tag_and_crate_version_consistency_and_pin_python() {
     assert!(
         workflow_pins_action_with_comment(
             &publish_workflow,
-            "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065",
-            "v5",
+            "actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405",
+            "v6.2.0",
         ),
         "expected publish workflow to pin Python for the verification script to a full SHA and preserve the source version comment"
     );
