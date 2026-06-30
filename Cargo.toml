@@ -43,7 +43,7 @@ tree-sitter-c = "0.24"
 tree-sitter-cpp = "0.23"
 tree-sitter-ruby = "0.23"
 tree-sitter-bash = "0.25"
-pdf-extract = "0.10"
+pdf-extract = "0.12"
 docx-lite = "0.2.0"
 
 [dev-dependencies]
