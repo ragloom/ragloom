@@ -68,6 +68,54 @@ Not supported yet:
 | document loading | UTF-8 text, Markdown, source code, embedded-text PDF extraction, deterministic DOCX text extraction | OCR, rich layout reconstruction, broader office-suite parsing |
 | operations | local health endpoint, local metrics endpoint, optional first-run collection bootstrap | non-local operator surfaces, broader collection lifecycle management |
 
+### v0.5 compatibility boundary
+
+The v0.5 compatibility boundary covers operator-visible point identity, Qdrant
+payload shape, CLI defaults, and durable state upgrades. It does not guarantee
+undocumented internal Rust APIs.
+
+The Qdrant point ID is the chunk identity. It is derived from the canonical
+source identity, chunk index, and exact chunker strategy fingerprint. The same
+inputs keep the same ID. Strategy-fingerprint changes intentionally open a new point-ID space.
+This prevents changed chunk boundaries or semantics from overwriting older
+chunks under reused IDs. Operators should reindex and then drop or
+garbage-collect old points when they want a clean collection. The identity is
+not duplicated as a `chunk_id` payload field.
+
+For v0.5, the stable Qdrant payload fields are `canonical_path`, `doc_id`,
+`tenant_id`, `file_extension`, `size_bytes`, `mtime_unix_secs`, `chunk_index`,
+`total_chunks`, `previous_chunk_id`, `next_chunk_id`, `chunk_start_byte`,
+`chunk_end_byte`, `chunk_char_len`, `chunk_text_sha256`, and
+`strategy_fingerprint`. Their names, presence, and JSON value kinds are the
+compatibility contract. `chunk_text` is optional compatibility data: v0.5
+emits it, but consumers should tolerate its omission. Newly added payload
+fields are non-contractual until they are explicitly added to this list.
+Identity, extension, hash, and strategy fields are strings; size, time, index,
+count, offset, and length fields are non-negative integers; neighboring chunk
+IDs are either UUID strings or `null`.
+
+The default embedding backend remains OpenAI with
+`https://api.openai.com/v1/embeddings` and `text-embedding-3-small`; the
+default chunker mode remains `router`, using character sizing with
+`max=2000`, `min=0`, and `overlap=0`. The default state path remains
+`.ragloom/wal.ndjson`, collection bootstrap and the health endpoint remain
+disabled, and the retry defaults remain 3 attempts, 128 queued retries, 100 ms
+initial backoff, and 2000 ms maximum backoff. Semantic chunking remains
+experimental and opt-in.
+
+Additive payload fields and bug fixes that preserve these identities, fields,
+defaults, and readable state are compatible. Removing or renaming a stable
+payload field, changing a default, reusing an old ID for different chunk
+content, or making released state unreadable is incompatible. Incompatible changes require release-note migration guidance.
+See the state-specific rules below for the supported upgrade path.
+
+| Upgrade observation | Operator action |
+| --- | --- |
+| Point IDs, stable payload fields, defaults, and released state remain compatible | No action |
+| Strategy fingerprint changes | Reindex; drop or garbage-collect the old point-ID space if a clean collection is required |
+| Stable payload field or CLI default changes | Follow the release notes; update payload consumers or pin the old configuration before upgrading |
+| Released state is not directly readable | Back up the state directory and follow the documented migration before starting the new release |
+
 ## Quickstart
 
 This example runs Ragloom from source against a local Qdrant instance and the default OpenAI embedding backend.
@@ -601,7 +649,7 @@ remains a feature-gated semantic provider and requires building with `--features
 
 ## Indexed Payload
 
-Each Qdrant point includes chunk text plus metadata such as:
+Each Qdrant point currently includes chunk text plus metadata such as:
 
 ```json
 {
@@ -614,7 +662,7 @@ Each Qdrant point includes chunk text plus metadata such as:
   "chunk_index": 0,
   "total_chunks": 3,
   "previous_chunk_id": null,
-  "next_chunk_id": "chunk_...",
+  "next_chunk_id": "9c5eb1c7-f9a7-4fc2-a260-761842356849",
   "chunk_start_byte": 0,
   "chunk_end_byte": 842,
   "chunk_char_len": 842,
@@ -623,6 +671,10 @@ Each Qdrant point includes chunk text plus metadata such as:
   "chunk_text": "..."
 }
 ```
+
+The Qdrant point ID is the chunk identity and is not duplicated as a
+`chunk_id` payload field. `previous_chunk_id` and `next_chunk_id` contain those
+same deterministic point-ID values for neighboring chunks.
 
 This is the part of Ragloom that makes inspection easier: you can look at a point in Qdrant and see where it came from, how it was chunked, and which neighboring chunks surround it.
 
