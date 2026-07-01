@@ -1,6 +1,8 @@
 [advisories]
 version = 2
-ignore = []
+# lopdf 0.42.0 still requires ttf-parser, and RUSTSEC-2026-0192 has no
+# patched release. Remove this exact exception when lopdf migrates away.
+ignore = ["RUSTSEC-2026-0192"]
 
 [licenses]
 version = 2

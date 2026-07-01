@@ -124,3 +124,59 @@ fn state_compatibility_contract_is_consistent_across_docs() {
         "expected CHANGELOG.md to record the state compatibility contract work"
     );
 }
+
+#[test]
+fn v0_5_compatibility_boundary_is_consistent_across_docs() {
+    let readme = read_repo_file("README.md");
+    let support = read_repo_file("SUPPORT.md");
+    let changelog = read_repo_file("CHANGELOG.md");
+
+    for (name, document) in [
+        ("README.md", readme.as_str()),
+        ("SUPPORT.md", support.as_str()),
+        ("CHANGELOG.md", changelog.as_str()),
+    ] {
+        assert!(
+            document.contains("v0.5 compatibility boundary"),
+            "expected {name} to name the v0.5 compatibility boundary"
+        );
+        assert!(
+            document.contains("Qdrant point ID is the chunk identity"),
+            "expected {name} to define the point-ID compatibility surface"
+        );
+        assert!(
+            document.contains("not duplicated as a `chunk_id` payload field"),
+            "expected {name} to distinguish point identity from payload fields"
+        );
+        assert!(
+            document
+                .contains("Strategy-fingerprint changes intentionally open a new point-ID space."),
+            "expected {name} to explain when reindexing is required"
+        );
+        assert!(
+            document.contains("`canonical_path`")
+                && document.contains("`doc_id`")
+                && document.contains("`chunk_index`")
+                && document.contains("`total_chunks`")
+                && document.contains("`previous_chunk_id`")
+                && document.contains("`next_chunk_id`")
+                && document.contains("`strategy_fingerprint`")
+                && document.contains("`chunk_text_sha256`"),
+            "expected {name} to name the stable Qdrant payload fields"
+        );
+        assert!(
+            document.contains("`chunk_text` is optional compatibility data"),
+            "expected {name} to distinguish optional payload text"
+        );
+        assert!(
+            document.contains("default embedding backend remains OpenAI")
+                && document.contains("default chunker mode remains `router`")
+                && document.contains("semantic chunking remains experimental and opt-in"),
+            "expected {name} to preserve the stable CLI defaults and experimental boundary"
+        );
+        assert!(
+            document.contains("Incompatible changes require release-note migration guidance."),
+            "expected {name} to require migration guidance for incompatible changes"
+        );
+    }
+}

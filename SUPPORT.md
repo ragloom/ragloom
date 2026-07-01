@@ -93,6 +93,52 @@ other unsupported state shapes fail closed with a `state` error. Maintainers
 should treat any future incompatible state change as requiring an explicit,
 documented migration boundary rather than a silent format reinterpretation.
 
+## v0.5 compatibility boundary
+
+The v0.5 compatibility boundary covers operator-visible point identity, Qdrant
+payload shape, CLI defaults, and durable state upgrades. Undocumented internal
+Rust APIs are outside this support promise.
+
+The Qdrant point ID is the chunk identity. It is derived from canonical source
+identity, chunk index, and the exact chunker strategy fingerprint.
+Strategy-fingerprint changes intentionally open a new point-ID space.
+Ragloom must never silently reuse an old point ID for different chunk content.
+Operators who need a clean collection should reindex and then drop or
+garbage-collect the old point-ID space.
+The identity is not duplicated as a `chunk_id` payload field.
+
+The stable v0.5 payload fields are `canonical_path`, `doc_id`, `tenant_id`,
+`file_extension`, `size_bytes`, `mtime_unix_secs`, `chunk_index`,
+`total_chunks`, `previous_chunk_id`, `next_chunk_id`, `chunk_start_byte`,
+`chunk_end_byte`, `chunk_char_len`, `chunk_text_sha256`, and
+`strategy_fingerprint`. Their names, presence, and JSON value kinds are
+supported. `chunk_text` is optional compatibility data: v0.5 emits it, but
+payload consumers should tolerate its omission. Additive fields are
+non-contractual until this policy names them as stable.
+Identity, extension, hash, and strategy fields are strings; size, time, index,
+count, offset, and length fields are non-negative integers; neighboring chunk
+IDs are either UUID strings or `null`.
+
+The default embedding backend remains OpenAI with
+`https://api.openai.com/v1/embeddings` and `text-embedding-3-small`; the
+default chunker mode remains `router` with character sizing at `max=2000`,
+`min=0`, and `overlap=0`. The default state path remains `.ragloom/wal.ndjson`,
+collection bootstrap and health remain disabled by default, and retry defaults
+remain 3 attempts, 128 queued retries, 100 ms initial backoff, and 2000 ms
+maximum backoff. Semantic chunking remains experimental and opt-in.
+
+Additive payload fields and fixes that preserve the documented identity,
+payload, default, and state contracts are compatible. Removing or renaming a
+stable field, changing a default, reusing an ID for different content, or
+making released state unreadable is incompatible. Incompatible changes require release-note migration guidance.
+
+| Upgrade observation | Operator action |
+| --- | --- |
+| Point IDs, stable payload fields, defaults, and released state remain compatible | No action |
+| Strategy fingerprint changes | Reindex; drop or garbage-collect the old point-ID space if a clean collection is required |
+| Stable payload field or CLI default changes | Follow the release notes and update consumers or configuration |
+| Released state is not directly readable | Back up the state directory and complete the documented migration before startup |
+
 ## Feature Boundaries
 
 Core support boundary maintainers are hardening for the current `v0.4`

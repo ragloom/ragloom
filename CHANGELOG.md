@@ -8,6 +8,10 @@
   `failed.ndjson` shapes under the current implementation.
 
 ### Changed
+- Upgraded `pdf-extract` to `0.12.0` and `lopdf` to `0.42.0` to address
+  `RUSTSEC-2026-0187`. The no-fix `ttf-parser` maintenance advisory remains a
+  narrowly scoped `cargo-deny` exception until `lopdf` migrates away from it.
+- Updated `quinn-proto` to `0.11.15` to address `RUSTSEC-2026-0185`.
 - Defined the `v0.5.0` on-disk compatibility contract as direct readability of
   supported released `v0.4.x` WAL state, with `v0.4.0` as the minimum
   supported WAL version and `failed.ndjson` support applying from `v0.4.1+`.
@@ -15,12 +19,32 @@
   lines, truncated final writes, and unsupported state shapes now have
   explicit contract coverage and remain startup errors instead of best-effort
   recovery cases.
+- Defined the v0.5 compatibility boundary for deterministic point identity,
+  Qdrant payloads, CLI defaults, and durable state.
+  The Qdrant point ID is the chunk identity.
+  It is not duplicated as a `chunk_id` payload field.
+  Strategy-fingerprint changes intentionally open a new point-ID space.
+  IDs are not reused for different chunk content.
+- Marked `canonical_path`, `doc_id`, `tenant_id`, `file_extension`,
+  `size_bytes`, `mtime_unix_secs`, `chunk_index`, `total_chunks`,
+  `previous_chunk_id`, `next_chunk_id`, `chunk_start_byte`, `chunk_end_byte`,
+  `chunk_char_len`, `chunk_text_sha256`, and `strategy_fingerprint` as the
+  stable v0.5 payload fields. `chunk_text` is optional compatibility data;
+  additive fields remain non-contractual until explicitly promoted.
+- Recorded that the default embedding backend remains OpenAI with
+  `text-embedding-3-small`, the default chunker mode remains `router`, state
+  remains at `.ragloom/wal.ndjson`, health remains disabled, and existing
+  sizing and retry defaults remain unchanged. Semantic chunking remains
+  experimental and opt-in.
 
 ### Docs
 - Documented the state upgrade contract consistently across `README.md`,
   `SUPPORT.md`, and `CHANGELOG.md`, including the minimum supported state
   version and the requirement for explicit migration notes before any future
   incompatible state change.
+- Added an operator action matrix for the v0.5 compatibility boundary:
+  additive payload fields and behavior-preserving fixes do not require
+  operator action. Incompatible changes require release-note migration guidance.
 
 ## [0.4.1] - 2026-06-02
 
