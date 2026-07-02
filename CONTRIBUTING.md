@@ -2,6 +2,21 @@
 
 Issues and pull requests are welcome. Keep changes small, test-backed, and aligned with Ragloom's minimalist design goals.
 
+## Rust Toolchain
+
+The workspace MSRV is Rust 1.88. Use the latest stable Rust release for normal
+development and the full local quality gates. When changing dependencies,
+language features, or build configuration, also verify the MSRV:
+
+```bash
+cargo +1.88 check --workspace --all-targets --all-features --locked
+```
+
+Do not merge a dependency update that requires a newer compiler without also
+updating both `package.rust-version` declarations, the MSRV CI job,
+`SUPPORT.md`, and the release notes. MSRV increases are not allowed in patch
+releases.
+
 ## Local Verification
 
 The local verification commands are:

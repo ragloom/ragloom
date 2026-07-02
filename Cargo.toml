@@ -2,6 +2,7 @@
 name = "ragloom"
 version = "0.5.0"
 edition = "2024"
+rust-version = "1.88"
 authors = ["Bizer <3411596361@qq.com>"]
 description = "The minimalist RAG ingestion engine"
 readme = "README.md"

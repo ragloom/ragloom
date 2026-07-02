@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+- Established Rust 1.88 as the MSRV, declared it in both workspace package
+  manifests, and added a dedicated all-targets, all-features MSRV CI check.
+  Patch releases will not raise the MSRV.
+
 ### Removed
 - Removed the deprecated `ChunkerConfig`, `ChunkingStrategy`,
   `chunk_document`, and `chunk_text` compatibility APIs. Use

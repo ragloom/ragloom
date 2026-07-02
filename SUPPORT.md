@@ -50,6 +50,22 @@ Each published archive also includes a matching `.sha256.txt` checksum file.
 Release checksums are generated with a platform-aware command so Linux targets
 use `sha256sum` while macOS targets use `shasum -a 256`.
 
+## Rust Version Support
+
+Ragloom's minimum supported Rust version (MSRV) is 1.88. Both workspace
+packages declare this requirement through `package.rust-version`.
+
+CI checks the complete workspace, including all targets and features, on the
+MSRV. The full formatting, Clippy, test, documentation, and maintainer gates
+run on the latest stable Rust release. Versions between the MSRV and latest
+stable are supported but are not tested individually.
+
+Patch releases do not raise the MSRV. An MSRV increase requires a minor release
+or a new major release, an updated `rust-version` declaration and MSRV CI job,
+and a release-note entry. Maintainers may raise the MSRV when the project or a
+required dependency needs a newer compiler; the change must not be made only
+through a dependency update without updating this policy and the CI gate.
+
 ## v0.5 Support Readiness
 
 For the current `v0.5` support surface, maintainers should treat the following

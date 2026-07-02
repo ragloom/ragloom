@@ -240,6 +240,9 @@ If you prefer or need an unsupported target, install from source with Cargo.
 
 ### Build from source
 
+Building Ragloom requires Rust 1.88 or newer. The latest stable Rust release is
+recommended.
+
 ```bash
 git clone https://github.com/ragloom/ragloom
 cd ragloom
