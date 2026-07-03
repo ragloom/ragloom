@@ -25,7 +25,7 @@ Ragloom publishes artifacts through:
 
 Maintainers should start releases from `.github/workflows/release.yml` using
 `workflow_dispatch` with an explicit crate version from `Cargo.toml`
-(for example `0.5.0`).
+(for example `1.0.0-rc.1`).
 
 The release workflow verifies that:
 
@@ -43,8 +43,8 @@ published notes come from the repository event history rather than ad hoc local
 release text.
 
 GitHub Release archives are published with explicit target names such as
-`ragloom-v0.5.0-x86_64-unknown-linux-gnu.tar.gz` and
-`ragloom-v0.5.0-x86_64-pc-windows-msvc.zip`.
+`ragloom-v1.0.0-rc.1-x86_64-unknown-linux-gnu.tar.gz` and
+`ragloom-v1.0.0-rc.1-x86_64-pc-windows-msvc.zip`.
 
 Each published archive also includes a matching `.sha256.txt` checksum file.
 Release checksums are generated with a platform-aware command so Linux targets
@@ -66,9 +66,13 @@ and a release-note entry. Maintainers may raise the MSRV when the project or a
 required dependency needs a newer compiler; the change must not be made only
 through a dependency update without updating this policy and the CI gate.
 
-## v0.5 Support Readiness
+Release-candidate versions are published as GitHub prereleases and are never
+marked as the latest stable GitHub Release or container image. The canonical
+RC version and tag forms are `1.0.0-rc.1` and `v1.0.0-rc.1`.
 
-For the current `v0.5` support surface, maintainers should treat the following
+## v1 Support Readiness
+
+For the v1 support surface, maintainers should treat the following
 as release-blocking for the commit being released:
 
 - `ci` is green for the release commit or release branch tip
@@ -82,13 +86,19 @@ The following are not release-blocking by default:
 - macOS artifact failures, unless maintainers explicitly promote macOS to a supported release target
 - experimental semantic chunking behavior, as long as the default non-semantic ingest path remains healthy
 
-The optional `fastembed` graph in `v0.5.0` retains `paste 1.0.15`, which is
+The optional `fastembed` graph in `v1.0.0-rc.1` retains `paste 1.0.15`, which is
 covered by the unmaintained-crate advisory `RUSTSEC-2024-0436`. There is no
 patched `paste` release, and upstream `tokenizers` has not completed its
-migration. Maintainers accept this narrowly scoped risk for `v0.5.0` because
+migration. Maintainers accept this narrowly scoped risk for `v1.0.0-rc.1` because
 `fastembed` is experimental and opt-in, the default embedding path does not
 include it, and dedicated feature checks remain green. Removal continues to be
 tracked in issue #67.
+
+The default PDF extraction graph retains `ttf-parser 0.25.1`, covered by the
+unmaintained-crate advisory `RUSTSEC-2026-0192`. There is no patched
+`ttf-parser` release. The dependency remains transitive through `lopdf`, PDF
+extraction has dedicated tests, and the exception is scoped to that exact
+advisory. Remove it when `lopdf` migrates to a maintained font parser.
 
 The released `docx-lite 0.2.0` and `rust-s3 0.37.2` dependency constraints
 retain `quick-xml` versions affected by `RUSTSEC-2026-0194` and
@@ -96,7 +106,9 @@ retain `quick-xml` versions affected by `RUSTSEC-2026-0194` and
 `quick-xml 0.41.0`. Crafted DOCX XML or responses from a configured S3
 endpoint can cause CPU or memory exhaustion. The exact advisory exceptions in
 `deny.toml` and `.cargo/audit.toml` are temporary and must be removed as soon
-as both upstream crates permit the patched version.
+as both upstream crates permit the patched version. Until then, DOCX files and
+configured S3 endpoints are trusted-input boundaries; operators must not expose
+either path as an unauthenticated document parsing service.
 
 ## Support Scope
 
@@ -115,21 +127,22 @@ original journal is the durability boundary and the command returns a `state`
 error instead of dropping records.
 
 The on-disk state compatibility contract is also part of that support boundary.
-`v0.5.0` directly reads supported released `v0.4.x` WAL state, with `v0.4.0`
-as the minimum supported WAL version. `failed.ndjson` is part of that contract
-starting in `v0.4.1`, when the failed-work journal first became a released
-state surface.
+`v1.0.0-rc.1` directly reads supported released `v0.4.x` and `v0.5.0` WAL
+state, with `v0.4.0` as the minimum supported WAL version. `failed.ndjson` is
+part of that contract starting in `v0.4.1`, when the failed-work journal first
+became a released state surface.
 
 Unknown future record variants, malformed lines, truncated final writes, and
 other unsupported state shapes fail closed with a `state` error. Maintainers
 should treat any future incompatible state change as requiring an explicit,
 documented migration boundary rather than a silent format reinterpretation.
 
-## v0.5 compatibility boundary
+## v1 compatibility boundary
 
-The v0.5 compatibility boundary covers operator-visible point identity, Qdrant
-payload shape, CLI defaults, and durable state upgrades. Undocumented internal
-Rust APIs are outside this support promise.
+The v1 compatibility boundary covers operator-visible point identity, Qdrant
+payload shape, CLI defaults, durable state upgrades, and supported release
+targets. The Rust library API remains preview during the release-candidate
+series and becomes SemVer-stable with final `v1.0.0`.
 
 The Qdrant point ID is the chunk identity. It is derived from canonical source
 identity, chunk index, and the exact chunker strategy fingerprint.
@@ -139,12 +152,12 @@ Operators who need a clean collection should reindex and then drop or
 garbage-collect the old point-ID space.
 The identity is not duplicated as a `chunk_id` payload field.
 
-The stable v0.5 payload fields are `canonical_path`, `doc_id`, `tenant_id`,
+The stable v1 payload fields are `canonical_path`, `doc_id`, `tenant_id`,
 `file_extension`, `size_bytes`, `mtime_unix_secs`, `chunk_index`,
 `total_chunks`, `previous_chunk_id`, `next_chunk_id`, `chunk_start_byte`,
 `chunk_end_byte`, `chunk_char_len`, `chunk_text_sha256`, and
 `strategy_fingerprint`. Their names, presence, and JSON value kinds are
-supported. `chunk_text` is optional compatibility data: v0.5 emits it, but
+supported. `chunk_text` is optional compatibility data: v1 emits it, but
 payload consumers should tolerate its omission. Additive fields are
 non-contractual until this policy names them as stable.
 Identity, extension, hash, and strategy fields are strings; size, time, index,
@@ -173,8 +186,7 @@ making released state unreadable is incompatible. Incompatible changes require r
 
 ## Feature Boundaries
 
-Core support boundary maintainers are hardening for the current `v0.5`
-support boundary:
+Core v1 support boundary:
 
 - local filesystem ingestion under one configured directory, plus polling S3 ingestion under one configured bucket/prefix
 - UTF-8 text, Markdown, source code, deterministic PDF text loading, and deterministic DOCX text extraction

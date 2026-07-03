@@ -15,4 +15,12 @@ Please allow time for investigation and coordinated remediation before public di
 
 ## Supported Versions
 
-Ragloom currently supports the latest released minor line only.
+During the release-candidate period, `1.0.0-rc.x` receives security fixes.
+After the final `1.0.0` release, the latest released v1 minor line is
+supported. The v0 line receives no fixes after final v1 availability.
+
+DOCX files and configured S3 endpoints are trusted-input boundaries for
+`v1.0.0-rc.1` because their transitive `quick-xml` versions have known
+resource-exhaustion advisories. Do not expose these inputs as an
+unauthenticated parsing service. This restriction will be removed when the
+upstream dependency constraints permit `quick-xml 0.41.0` or newer.

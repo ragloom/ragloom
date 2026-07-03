@@ -7,7 +7,7 @@ Point Ragloom at a folder. It watches local files, chunks documents, generates e
 Use it when you want a small, inspectable ingestion pipeline instead of a full RAG platform.
 
 ![Rust](https://img.shields.io/badge/Rust-2024-000000?logo=rust)
-![Status](https://img.shields.io/badge/status-alpha-b36b00)
+![Status](https://img.shields.io/badge/status-v1.0.0--rc.1-orange)
 
 ## Why Ragloom?
 
@@ -23,14 +23,12 @@ It is built for developers who want to:
 
 ## Status
 
-Ragloom is currently alpha software.
+Ragloom `v1.0.0-rc.1` is a release candidate for the first stable operator
+contract. It is intended for production-like validation before `v1.0.0`.
+Report compatibility regressions against the contract below before the final
+release.
 
-It is useful for local-folder to Qdrant ingestion experiments and small automation tasks.
-
-The v0.4 direction is to widen the ingestion surface carefully without losing
-the project's explicit support boundaries.
-
-Core path the project is hardening for the current v0.4 support boundary:
+Core v1 support boundary:
 
 - local filesystem source
 - polling S3 source
@@ -60,19 +58,22 @@ Not supported yet:
 - broad job-management or dead-letter queue subsystems beyond the local failed-work journal
 - built-in collection lifecycle management
 
-### v0.4 support matrix
+### v1 support matrix
 
-| Area | Supported in v0.4 | Explicitly out of scope |
+| Area | Supported in v1 | Explicitly out of scope |
 | --- | --- | --- |
 | sources | local filesystem, polling S3 | non-S3 remote sources |
 | document loading | UTF-8 text, Markdown, source code, embedded-text PDF extraction, deterministic DOCX text extraction | OCR, rich layout reconstruction, broader office-suite parsing |
 | operations | local health endpoint, local metrics endpoint, optional first-run collection bootstrap | non-local operator surfaces, broader collection lifecycle management |
 
-### v0.5 compatibility boundary
+### v1 compatibility boundary
 
-The v0.5 compatibility boundary covers operator-visible point identity, Qdrant
-payload shape, CLI defaults, and durable state upgrades. It does not guarantee
-undocumented internal Rust APIs.
+The v1 compatibility boundary covers operator-visible point identity, Qdrant
+payload shape, CLI defaults, durable state upgrades, and supported release
+targets. `v1.0.0-rc.1` freezes this contract for release-candidate validation.
+The Rust library API remains preview during the RC series; breaking Rust API
+changes must be documented in a later RC, and the public Rust API becomes
+SemVer-stable with the final `v1.0.0` release.
 
 The Qdrant point ID is the chunk identity. It is derived from the canonical
 source identity, chunk index, and exact chunker strategy fingerprint. The same
@@ -82,12 +83,12 @@ chunks under reused IDs. Operators should reindex and then drop or
 garbage-collect old points when they want a clean collection. The identity is
 not duplicated as a `chunk_id` payload field.
 
-For v0.5, the stable Qdrant payload fields are `canonical_path`, `doc_id`,
+For v1, the stable Qdrant payload fields are `canonical_path`, `doc_id`,
 `tenant_id`, `file_extension`, `size_bytes`, `mtime_unix_secs`, `chunk_index`,
 `total_chunks`, `previous_chunk_id`, `next_chunk_id`, `chunk_start_byte`,
 `chunk_end_byte`, `chunk_char_len`, `chunk_text_sha256`, and
 `strategy_fingerprint`. Their names, presence, and JSON value kinds are the
-compatibility contract. `chunk_text` is optional compatibility data: v0.5
+compatibility contract. `chunk_text` is optional compatibility data: v1
 emits it, but consumers should tolerate its omission. Newly added payload
 fields are non-contractual until they are explicitly added to this list.
 Identity, extension, hash, and strategy fields are strings; size, time, index,
@@ -227,12 +228,12 @@ Download the archive for your platform from the GitHub Release page, extract it,
 Examples:
 
 ```bash
-tar -xzf ragloom-v0.5.0-x86_64-unknown-linux-gnu.tar.gz
+tar -xzf ragloom-v1.0.0-rc.1-x86_64-unknown-linux-gnu.tar.gz
 ./ragloom --version
 ```
 
 ```powershell
-Expand-Archive .\ragloom-v0.5.0-x86_64-pc-windows-msvc.zip -DestinationPath .
+Expand-Archive .\ragloom-v1.0.0-rc.1-x86_64-pc-windows-msvc.zip -DestinationPath .
 .\ragloom.exe --version
 ```
 
@@ -487,9 +488,9 @@ record so the durability boundary remains one acknowledged append at a time.
 
 ### State compatibility contract
 
-Ragloom `v0.5.0` directly reads the supported released `v0.4.x` WAL format,
-with `v0.4.0` as the minimum supported on-disk WAL version. `failed.ndjson`
-enters that compatibility surface in `v0.4.1`; older state directories may not
+Ragloom `v1.0.0-rc.1` directly reads the supported released `v0.4.x` and
+`v0.5.0` WAL formats, with `v0.4.0` as the minimum supported on-disk WAL
+version. `failed.ndjson` enters that compatibility surface in `v0.4.1`; older state directories may not
 have a failed-work journal yet.
 
 These files are durable user-owned state. Ragloom does not silently skip or
@@ -746,10 +747,10 @@ build/version information:
 {
   "status": "ready",
   "ready": true,
-  "version": "0.4.0",
+  "version": "1.0.0-rc.1",
   "build": {
     "package": "ragloom",
-    "version": "0.4.0"
+    "version": "1.0.0-rc.1"
   }
 }
 ```
@@ -849,6 +850,16 @@ Status: shipped in `v0.5.0`.
 - recovery contracts covering pending work, deletes, acknowledgements, and point identity
 - state preflight checks and operator-facing replay summaries
 - durable-state backlog and journal-size metrics
+
+### v1.0 - Stable operator contract
+
+Status: release candidate in `v1.0.0-rc.1`.
+
+- frozen point-ID, payload, CLI-default, and durable-state contracts
+- direct upgrade coverage from released v0.4 and v0.5 state
+- Rust 1.88 MSRV policy and supported-platform release gates
+- live Qdrant collection, upsert, and delete smoke verification
+- prerelease-safe GitHub Release and container publication
 
 ## Limitations
 
@@ -966,7 +977,7 @@ Before opening a pull request, run:
 cargo qa
 ```
 
-Maintainers preparing release-sensitive or v0.4 support-boundary work should also run
+Maintainers preparing release-sensitive or v1 support-boundary work should also run
 the authoritative deeper local gate:
 
 ```bash

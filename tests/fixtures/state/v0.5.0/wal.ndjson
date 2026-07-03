@@ -1,0 +1,6 @@
+{"type":"work_item_v2","fingerprint":{"canonical_path":"/docs/v0.5-acked.md","size_bytes":200,"mtime_unix_secs":1710000500,"etag":null}}
+{"type":"sink_ack_v2","fingerprint":{"canonical_path":"/docs/v0.5-acked.md","size_bytes":200,"mtime_unix_secs":1710000500,"etag":null}}
+{"type":"work_item_v2","fingerprint":{"canonical_path":"/docs/v0.5-pending.md","size_bytes":220,"mtime_unix_secs":1710000600,"etag":"v0.5-etag"}}
+{"type":"delete_document","canonical_path":"/docs/v0.5-pending-delete.md"}
+{"type":"delete_document","canonical_path":"/docs/v0.5-acked-delete.md"}
+{"type":"delete_ack","canonical_path":"/docs/v0.5-acked-delete.md"}

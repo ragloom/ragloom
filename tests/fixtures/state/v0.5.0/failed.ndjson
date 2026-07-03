@@ -1,0 +1,3 @@
+{"type":"exhausted","id":1,"work":{"type":"work_item_v2","fingerprint":{"canonical_path":"/docs/v0.5-already-requeued.md","size_bytes":180,"mtime_unix_secs":1710000700,"etag":null}},"failure_kind":"embed","terminal_reason":"retry_exhausted","attempts":3}
+{"type":"requeued","exhausted_id":1}
+{"type":"exhausted","id":2,"work":{"type":"work_item_v2","fingerprint":{"canonical_path":"/docs/v0.5-retry.md","size_bytes":240,"mtime_unix_secs":1710000800,"etag":"retry-etag"}},"failure_kind":"sink","terminal_reason":"retry_exhausted","attempts":3}

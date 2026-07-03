@@ -5,7 +5,7 @@
 //! changing the WAL's acknowledgement/replay semantics.
 //!
 //! The journal shares the WAL's fail-closed compatibility posture: released
-//! `v0.4.1+` newline-delimited JSON records remain directly readable, while
+//! `v0.4.1+` newline-delimited JSON records remain directly readable through v1, while
 //! unknown future variants or malformed lines fail with `state` context.
 
 use std::fs::File;

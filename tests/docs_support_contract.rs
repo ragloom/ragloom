@@ -7,12 +7,12 @@ fn read_repo_file(path: &str) -> String {
 }
 
 #[test]
-fn readme_describes_v0_4_sources_formats_and_s3_example() {
+fn readme_describes_v1_sources_formats_and_s3_example() {
     let readme = read_repo_file("README.md");
 
     assert!(
-        readme.contains("v0.4"),
-        "expected README to frame the current support story around v0.4"
+        readme.contains("Core v1 support boundary"),
+        "expected README to frame the current support story around v1"
     );
     assert!(
         readme.contains("local filesystem source")
@@ -33,12 +33,12 @@ fn readme_describes_v0_4_sources_formats_and_s3_example() {
 }
 
 #[test]
-fn support_policy_describes_current_v0_4_support_boundary() {
+fn support_policy_describes_current_v1_support_boundary() {
     let support = read_repo_file("SUPPORT.md");
 
     assert!(
-        support.contains("v0.4"),
-        "expected SUPPORT.md to describe the current support boundary in v0.4 terms"
+        support.contains("Core v1 support boundary"),
+        "expected SUPPORT.md to describe the current support boundary in v1 terms"
     );
     assert!(
         support.contains("local filesystem ingestion under one configured directory, plus polling S3 ingestion under one configured bucket/prefix"),
@@ -98,8 +98,9 @@ fn state_compatibility_contract_is_consistent_across_docs() {
     let support = read_repo_file("SUPPORT.md");
     let changelog = read_repo_file("CHANGELOG.md");
 
-    let readme_direct_read_phrase = "directly reads the supported released `v0.4.x` WAL format";
-    let support_direct_read_phrase = "directly reads supported released `v0.4.x` WAL state";
+    let readme_direct_read_phrase =
+        "directly reads the supported released `v0.4.x` and\n`v0.5.0` WAL formats";
+    let support_direct_read_phrase = "directly reads supported released `v0.4.x` and `v0.5.0` WAL";
     let min_version_phrase = "v0.4.0";
     let fail_closed_phrase = "truncated final writes";
 
@@ -108,7 +109,7 @@ fn state_compatibility_contract_is_consistent_across_docs() {
             && readme.contains(readme_direct_read_phrase)
             && readme.contains(min_version_phrase)
             && readme.contains(fail_closed_phrase),
-        "expected README to define the v0.5 state compatibility contract"
+        "expected README to define the v1 state compatibility contract"
     );
     assert!(
         support.contains("on-disk state compatibility contract")
@@ -126,7 +127,7 @@ fn state_compatibility_contract_is_consistent_across_docs() {
 }
 
 #[test]
-fn v0_5_compatibility_boundary_is_consistent_across_docs() {
+fn v1_compatibility_boundary_is_consistent_across_docs() {
     let readme = read_repo_file("README.md");
     let support = read_repo_file("SUPPORT.md");
     let changelog = read_repo_file("CHANGELOG.md");
@@ -137,8 +138,8 @@ fn v0_5_compatibility_boundary_is_consistent_across_docs() {
         ("CHANGELOG.md", changelog.as_str()),
     ] {
         assert!(
-            document.contains("v0.5 compatibility boundary"),
-            "expected {name} to name the v0.5 compatibility boundary"
+            document.contains("v1 compatibility boundary"),
+            "expected {name} to name the v1 compatibility boundary"
         );
         assert!(
             document.contains("Qdrant point ID is the chunk identity"),

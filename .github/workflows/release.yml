@@ -25,6 +25,7 @@ jobs:
     outputs:
       version: ${{ steps.verify.outputs.version }}
       tag: ${{ steps.verify.outputs.tag }}
+      prerelease: ${{ steps.verify.outputs.prerelease }}
       release_ref: ${{ steps.plan.outputs.release_ref }}
       create_tag: ${{ steps.plan.outputs.create_tag }}
     steps:
@@ -285,6 +286,8 @@ jobs:
           name: ${{ needs.prepare-release.outputs.tag }}
           target_commitish: ${{ needs.prepare-release.outputs.release_ref }}
           generate_release_notes: true
+          prerelease: ${{ needs.prepare-release.outputs.prerelease }}
+          make_latest: ${{ needs.prepare-release.outputs.prerelease == 'true' && 'false' || 'true' }}
           files: release-artifacts/**/*
 
   publish-best-effort-release-assets:
@@ -309,6 +312,8 @@ jobs:
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
           tag_name: ${{ needs.prepare-release.outputs.tag }}
+          prerelease: ${{ needs.prepare-release.outputs.prerelease }}
+          make_latest: ${{ needs.prepare-release.outputs.prerelease == 'true' && 'false' || 'true' }}
           files: release-artifacts-macos/**/*
 
   publish-crate:
