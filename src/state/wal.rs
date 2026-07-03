@@ -6,7 +6,7 @@
 //! coordination.
 //!
 //! The on-disk contract is intentionally small and fail-closed: released
-//! `v0.4.x` newline-delimited JSON records stay directly readable, while
+//! `v0.4.x` and `v0.5.0` newline-delimited JSON records stay directly readable, while
 //! unknown future variants or malformed lines fail with `state` context rather
 //! than being skipped.
 

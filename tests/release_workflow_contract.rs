@@ -86,6 +86,13 @@ fn release_workflow_supports_version_dispatch_and_release_notes() {
         "expected release workflow to generate release notes deterministically"
     );
     assert!(
+        workflow_yaml.contains("prerelease: ${{ needs.prepare-release.outputs.prerelease }}")
+            && workflow_yaml.contains(
+                "make_latest: ${{ needs.prepare-release.outputs.prerelease == 'true' && 'false' || 'true' }}",
+            ),
+        "expected release candidates to publish as prereleases without replacing the latest stable release"
+    );
+    assert!(
         workflow_yaml.contains("release_ref=\"$(git rev-list -n 1 \"${release_tag}\")\"")
             && workflow_yaml.contains("echo \"release_ref=${GITHUB_SHA}\" >> \"$GITHUB_OUTPUT\"")
             && !workflow_yaml.contains("echo \"release_ref=${GITHUB_REF}\" >> \"$GITHUB_OUTPUT\""),
@@ -215,11 +222,16 @@ fn quality_deep_workflow_exposes_pre_merge_stability_gate() {
         .get(serde_yaml::Value::String("docs-and-security".to_string()))
         .and_then(serde_yaml::Value::as_mapping)
         .expect("expected quality workflow to define a docs-and-security job");
+    let qdrant_live = jobs
+        .get(serde_yaml::Value::String("qdrant-live".to_string()))
+        .and_then(serde_yaml::Value::as_mapping)
+        .expect("expected quality workflow to define a live Qdrant job");
 
     let fastembed_yaml = serde_yaml::to_string(fastembed).expect("serialize fastembed job");
     let loom_yaml = serde_yaml::to_string(loom).expect("serialize loom job");
     let docs_and_security_yaml =
         serde_yaml::to_string(docs_and_security).expect("serialize docs-and-security job");
+    let qdrant_live_yaml = serde_yaml::to_string(qdrant_live).expect("serialize live Qdrant job");
     let fastembed_steps = fastembed
         .get(serde_yaml::Value::String("steps".to_string()))
         .and_then(serde_yaml::Value::as_sequence)
@@ -245,6 +257,16 @@ fn quality_deep_workflow_exposes_pre_merge_stability_gate() {
             && docs_and_security_yaml.contains("cargo audit")
             && docs_and_security_yaml.contains("cargo doc --workspace --no-deps"),
         "expected PR-visible stability checks to cover docs, cargo-deny, and cargo-audit"
+    );
+    assert!(
+        qdrant_live_yaml.contains(
+            "qdrant/qdrant:v1.18.2@sha256:75eab8c4ba42096724fdcfde8b4de0b5713d529dde32f285a1f86fdcb2c9e50c",
+        )
+            && qdrant_live_yaml.contains("Wait for Qdrant readiness")
+            && qdrant_live_yaml.contains("http://127.0.0.1:6333/readyz")
+            && qdrant_live_yaml.contains("cargo test --test qdrant_live_smoke")
+            && qdrant_live_yaml.contains("RAGLOOM_QDRANT_URL"),
+        "expected the release-quality gate to exercise bootstrap, writes, and deletes against a pinned live Qdrant"
     );
     assert!(
         fastembed_checkout_yaml.contains("persist-credentials: false"),
@@ -285,8 +307,46 @@ fn release_version_verifier_accepts_v_prefixed_manual_version_input() {
     let output_lines: Vec<_> = github_output.lines().collect();
     assert!(
         output_lines.contains(&format!("version={version}").as_str())
-            && output_lines.contains(&format!("tag=v{version}").as_str()),
-        "expected verifier to normalize the version output and derive the release tag"
+            && output_lines.contains(&format!("tag=v{version}").as_str())
+            && output_lines.contains(&"prerelease=true"),
+        "expected verifier to normalize the version output, derive the release tag, and identify the RC"
+    );
+}
+
+#[test]
+fn release_version_verifier_marks_stable_versions_as_not_prerelease() {
+    let temp = tempfile::tempdir().expect("create temporary repository");
+    let scripts_dir = temp.path().join(".github").join("scripts");
+    fs::create_dir_all(&scripts_dir).expect("create temporary scripts directory");
+    fs::write(
+        scripts_dir.join("verify-release-version.py"),
+        read_repo_file(".github/scripts/verify-release-version.py"),
+    )
+    .expect("copy release verifier");
+    fs::write(
+        temp.path().join("Cargo.toml"),
+        "[package]\nname = \"release-verifier-test\"\nversion = \"1.0.0\"\n",
+    )
+    .expect("write stable temporary manifest");
+    let output_file = tempfile::NamedTempFile::new().expect("create temporary GITHUB_OUTPUT");
+
+    let output = Command::new("python")
+        .arg(".github/scripts/verify-release-version.py")
+        .current_dir(temp.path())
+        .env("EXPECTED_VERSION", "1.0.0")
+        .env("EXPECTED_TAG", "v1.0.0")
+        .env("GITHUB_OUTPUT", output_file.path())
+        .output()
+        .expect("run stable release version verifier with Python");
+    assert!(
+        output.status.success(),
+        "expected stable version verification to succeed; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let github_output = fs::read_to_string(output_file.path()).expect("read GITHUB_OUTPUT");
+    assert!(
+        github_output.lines().any(|line| line == "prerelease=false"),
+        "expected stable versions to be marked as not prerelease"
     );
 }
 
@@ -407,5 +467,15 @@ fn support_docs_describe_release_dispatch_runbook() {
     assert!(
         support.contains("ragloom-v") && support.contains(".tar.gz") && support.contains(".zip"),
         "expected support docs to describe the published release archive naming convention"
+    );
+}
+
+#[test]
+fn container_workflow_never_promotes_prereleases_to_latest() {
+    let container = read_repo_file(".github/workflows/container.yml");
+
+    assert!(
+        container.contains("type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}",),
+        "expected prerelease container tags to leave the stable latest tag unchanged"
     );
 }

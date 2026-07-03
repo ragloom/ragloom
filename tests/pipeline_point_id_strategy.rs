@@ -106,4 +106,9 @@ async fn two_strategies_yield_distinct_point_ids() {
         ids_a,
         ids_b
     );
+    assert_eq!(
+        points_a[0].id.as_str(),
+        "9904e630-a206-4da1-b15f-aa169b35f7de",
+        "v1 must preserve the point-ID algorithm released by v0.5"
+    );
 }

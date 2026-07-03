@@ -2,10 +2,27 @@
 
 ## [Unreleased]
 
+## [1.0.0-rc.1] - 2026-07-03
+
+### Added
+- Defined the v1 compatibility boundary for deterministic point IDs,
+  Qdrant payloads, CLI defaults, durable state, and supported release targets.
+- Added checked-in `v0.5.0` state fixtures and upgrade contract tests covering
+  direct reads, failed-work replay, compaction, and stable observable state.
+- Added a release-blocking live Qdrant smoke test for collection bootstrap,
+  deterministic upsert, and document deletion.
+- Added prerelease-aware release workflow behavior so release candidates are
+  never marked as the latest stable GitHub Release or container image.
+
 ### Changed
 - Established Rust 1.88 as the MSRV, declared it in both workspace package
   manifests, and added a dedicated all-targets, all-features MSRV CI check.
   Patch releases will not raise the MSRV.
+- Declared `1.0.0-rc.1` as a release candidate. The operator-facing v1
+  contract is frozen for validation; the Rust library API remains preview
+  until the final `1.0.0` release.
+- Updated `anyhow` to `1.0.103`, removing `RUSTSEC-2026-0190` from the locked
+  dependency graph.
 
 ### Removed
 - Removed the deprecated `ChunkerConfig`, `ChunkingStrategy`,
@@ -13,6 +30,12 @@
   `RecursiveChunker` through the `Chunker` trait instead.
 
 ### Security
+- Retained the documented `RUSTSEC-2024-0436` maintenance exception for
+  `paste 1.0.15` in the experimental, opt-in `fastembed` graph. Removal
+  remains tracked in issue #67.
+- Retained the exact `RUSTSEC-2026-0192` maintenance exception for
+  `ttf-parser 0.25.1` in the PDF extraction graph. The advisory has no patched
+  release; remove the exception when `lopdf` migrates to a maintained parser.
 - Accepted temporary, exact advisory exceptions for `RUSTSEC-2026-0194` and
   `RUSTSEC-2026-0195`. The affected `quick-xml` versions remain transitive
   through `docx-lite 0.2.0` and `rust-s3 0.37.2`, whose released dependency

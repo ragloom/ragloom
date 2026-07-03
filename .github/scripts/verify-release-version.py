@@ -68,9 +68,11 @@ def main() -> None:
         )
 
     tag = expected_tag or f"v{expected_version}"
+    prerelease = "true" if "-" in expected_version else "false"
     append_output("crate_version", crate_version)
     append_output("version", expected_version)
     append_output("tag", tag)
+    append_output("prerelease", prerelease)
 
     print(
         f"verified Cargo.toml package.version '{crate_version}' for release tag '{tag}'",
