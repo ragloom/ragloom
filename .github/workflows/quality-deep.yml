@@ -36,6 +36,19 @@ jobs:
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
+      - name: Wait for Qdrant readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:6333/readyz >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Qdrant did not become ready within 30 seconds" >&2
+          exit 1
+
       - name: Run live Qdrant smoke test
         env:
           RAGLOOM_QDRANT_URL: http://127.0.0.1:6333

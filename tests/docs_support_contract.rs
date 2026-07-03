@@ -120,7 +120,7 @@ fn state_compatibility_contract_is_consistent_across_docs() {
         "expected SUPPORT.md to treat the state compatibility contract as supported surface"
     );
     assert!(
-        changelog.contains("on-disk compatibility contract")
+        changelog.contains("v1 compatibility boundary")
             && changelog.contains(min_version_phrase)
             && changelog.contains(fail_closed_phrase),
         "expected CHANGELOG.md to record the state compatibility contract work"

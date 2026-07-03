@@ -52,10 +52,8 @@ fn fp(path: &str, size_bytes: u64, mtime_unix_secs: i64) -> FileFingerprint {
 
 fn fp_with_etag(path: &str, size_bytes: u64, mtime_unix_secs: i64, etag: &str) -> FileFingerprint {
     FileFingerprint {
-        canonical_path: path.to_string(),
-        size_bytes,
-        mtime_unix_secs,
         etag: Some(etag.to_string()),
+        ..fp(path, size_bytes, mtime_unix_secs)
     }
 }
 
@@ -356,11 +354,14 @@ async fn compact_state_command_preserves_v0_5_0_observables() {
         .read_all()
         .expect("read failed before");
 
-    compact_state_command(&CompactStateConfig {
+    let summary = compact_state_command(&CompactStateConfig {
         state_path: wal_path.to_string_lossy().to_string(),
     })
     .await
     .expect("compact v0.5.0");
+
+    assert!(summary.wal.records_after <= summary.wal.records_before);
+    assert!(summary.failed_work.records_after <= summary.failed_work.records_before);
 
     let wal_after = FileWal::open(&wal_path)
         .expect("open wal after")

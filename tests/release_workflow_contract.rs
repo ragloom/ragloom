@@ -262,6 +262,8 @@ fn quality_deep_workflow_exposes_pre_merge_stability_gate() {
         qdrant_live_yaml.contains(
             "qdrant/qdrant:v1.18.2@sha256:75eab8c4ba42096724fdcfde8b4de0b5713d529dde32f285a1f86fdcb2c9e50c",
         )
+            && qdrant_live_yaml.contains("Wait for Qdrant readiness")
+            && qdrant_live_yaml.contains("http://127.0.0.1:6333/readyz")
             && qdrant_live_yaml.contains("cargo test --test qdrant_live_smoke")
             && qdrant_live_yaml.contains("RAGLOOM_QDRANT_URL"),
         "expected the release-quality gate to exercise bootstrap, writes, and deletes against a pinned live Qdrant"
@@ -313,11 +315,38 @@ fn release_version_verifier_accepts_v_prefixed_manual_version_input() {
 
 #[test]
 fn release_version_verifier_marks_stable_versions_as_not_prerelease() {
-    let script = read_repo_file(".github/scripts/verify-release-version.py");
+    let temp = tempfile::tempdir().expect("create temporary repository");
+    let scripts_dir = temp.path().join(".github").join("scripts");
+    fs::create_dir_all(&scripts_dir).expect("create temporary scripts directory");
+    fs::write(
+        scripts_dir.join("verify-release-version.py"),
+        read_repo_file(".github/scripts/verify-release-version.py"),
+    )
+    .expect("copy release verifier");
+    fs::write(
+        temp.path().join("Cargo.toml"),
+        "[package]\nname = \"release-verifier-test\"\nversion = \"1.0.0\"\n",
+    )
+    .expect("write stable temporary manifest");
+    let output_file = tempfile::NamedTempFile::new().expect("create temporary GITHUB_OUTPUT");
 
+    let output = Command::new("python")
+        .arg(".github/scripts/verify-release-version.py")
+        .current_dir(temp.path())
+        .env("EXPECTED_VERSION", "1.0.0")
+        .env("EXPECTED_TAG", "v1.0.0")
+        .env("GITHUB_OUTPUT", output_file.path())
+        .output()
+        .expect("run stable release version verifier with Python");
     assert!(
-        script.contains("prerelease = \"true\" if \"-\" in expected_version else \"false\""),
-        "expected the verifier to distinguish stable versions from prereleases"
+        output.status.success(),
+        "expected stable version verification to succeed; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let github_output = fs::read_to_string(output_file.path()).expect("read GITHUB_OUTPUT");
+    assert!(
+        github_output.lines().any(|line| line == "prerelease=false"),
+        "expected stable versions to be marked as not prerelease"
     );
 }
 
