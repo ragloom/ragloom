@@ -98,15 +98,16 @@ fn state_compatibility_contract_is_consistent_across_docs() {
     let support = read_repo_file("SUPPORT.md");
     let changelog = read_repo_file("CHANGELOG.md");
 
-    let readme_direct_read_phrase =
-        "directly reads the supported released `v0.4.x` and\n`v0.5.0` WAL formats";
+    let readme_direct_read_prefix = "directly reads the supported released `v0.4.x` and";
+    let readme_direct_read_suffix = "`v0.5.0` WAL formats";
     let support_direct_read_phrase = "directly reads supported released `v0.4.x` and `v0.5.0` WAL";
     let min_version_phrase = "v0.4.0";
     let fail_closed_phrase = "truncated final writes";
 
     assert!(
         readme.contains("State compatibility contract")
-            && readme.contains(readme_direct_read_phrase)
+            && readme.contains(readme_direct_read_prefix)
+            && readme.contains(readme_direct_read_suffix)
             && readme.contains(min_version_phrase)
             && readme.contains(fail_closed_phrase),
         "expected README to define the v1 state compatibility contract"
